@@ -119,6 +119,7 @@ private:
     // 线程管理
     std::unique_ptr<std::thread> state_monitor_thread_;
     std::atomic<bool> should_stop_;
+    rclcpp::TimerBase::SharedPtr task_completion_timer_;
 
     // ROS2回调函数
 

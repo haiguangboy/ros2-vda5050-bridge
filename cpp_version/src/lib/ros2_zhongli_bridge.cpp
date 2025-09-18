@@ -245,10 +245,47 @@ void ROS2ZhongliBridge::handle_task_message(const zhongli_protocol::TaskMessage&
 
     current_task_id_ = task_msg.taskId;
 
-    // 这里可以添加任务处理逻辑
-    // 例如：根据任务设置导航目标
-
     log_debug("任务从 " + task_msg.startArea + " 到 " + task_msg.targetArea);
+
+    // 模拟任务处理过程
+    RCLCPP_INFO(this->get_logger(), "🔄 开始处理任务: %s", task_msg.taskId.c_str());
+    RCLCPP_INFO(this->get_logger(), "   起始区域: %s (动作: %s)",
+                task_msg.startArea.c_str(), task_msg.startAction.c_str());
+    RCLCPP_INFO(this->get_logger(), "   目标区域: %s (动作: %s)",
+                task_msg.targetArea.c_str(), task_msg.targetAction.c_str());
+
+    // 创建一个定时器来模拟任务执行时间（3秒后完成）
+    task_completion_timer_ = this->create_wall_timer(
+        std::chrono::seconds(3),
+        [this, task_msg]() {
+            // 模拟任务完成
+            RCLCPP_INFO(this->get_logger(), "✅ 任务执行完成: %s", task_msg.taskId.c_str());
+
+            // 创建任务状态消息
+            zhongli_protocol::TaskStatusMessage status_msg;
+            status_msg.timestamp = zhongli_protocol::create_timestamp();
+            status_msg.taskId = task_msg.taskId;
+            status_msg.status = "success";
+            status_msg.finishTime = zhongli_protocol::create_timestamp();
+            status_msg.reason = "";
+
+            // 发布任务状态
+            if (mqtt_client_) {
+                bool success = mqtt_client_->publish_task_status(status_msg);
+                if (success) {
+                    RCLCPP_INFO(this->get_logger(), "📤 任务状态已发布: %s - %s",
+                                status_msg.taskId.c_str(), status_msg.status.c_str());
+                } else {
+                    RCLCPP_ERROR(this->get_logger(), "❌ 任务状态发布失败: %s",
+                                 status_msg.taskId.c_str());
+                }
+            }
+
+            // 取消定时器（一次性执行）
+            task_completion_timer_->cancel();
+            task_completion_timer_.reset();
+        }
+    );
 }
 
 void ROS2ZhongliBridge::handle_trajectory_status(const zhongli_protocol::TrajectoryStatusMessage& status_msg) {
