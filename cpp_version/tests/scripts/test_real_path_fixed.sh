@@ -71,13 +71,13 @@ find_package(tf2_geometry_msgs REQUIRED)
 find_package(nlohmann_json REQUIRED)
 
 # 包含源代码目录
-include_directories(../src/include)
+include_directories(../../src/include)
 
 # 创建测试可执行文件
 add_executable(test_path_conversion
-    ../test_real_path_conversion.cpp
-    ../src/lib/zhongli_protocol_types.cpp
-    ../src/lib/path_converter.cpp
+    ../cpp/test_real_path_conversion.cpp
+    ../../src/lib/zhongli_protocol_types.cpp
+    ../../src/lib/path_converter.cpp
 )
 
 # 链接ROS2库

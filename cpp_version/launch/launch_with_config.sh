@@ -19,7 +19,7 @@ fi
 echo "✅ ROS2环境: $ROS_DISTRO"
 
 # 检查配置文件是否存在
-CONFIG_FILE="config/bridge_config.yaml"
+CONFIG_FILE="../config/bridge_config.yaml"
 if [ ! -f "$CONFIG_FILE" ]; then
     echo "❌ 配置文件不存在: $CONFIG_FILE"
     exit 1
@@ -33,7 +33,7 @@ echo "=================="
 echo ""
 
 # 检查可执行文件是否存在
-EXECUTABLE="install/bin/zhongli_bridge_node"
+EXECUTABLE="../install/bin/zhongli_bridge_node"
 if [ ! -f "$EXECUTABLE" ]; then
     echo "❌ 可执行文件不存在: $EXECUTABLE"
     echo "请先运行编译脚本"
