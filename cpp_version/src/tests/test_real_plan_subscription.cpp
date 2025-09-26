@@ -87,7 +87,7 @@ private:
 
         for (size_t i = 0; i < show_count; ++i) {
             const auto& pose = path.poses[i].pose;
-            double yaw = PathConverter::quaternion_to_yaw_degrees(pose.orientation);
+            double yaw = PathConverter::quaternion_to_yaw_radians(pose.orientation);
 
             std::cout << "    [" << (i+1) << "] 位置("
                       << std::fixed << std::setprecision(2)

@@ -37,11 +37,13 @@ bool ROS2ZhongliBridge::initialize() {
         RCLCPP_INFO(this->get_logger(), "📊 状态发布频率: %.1f Hz", state_publish_rate_);
         RCLCPP_INFO(this->get_logger(), "🎯 位置容差: %.2f m", goal_tolerance_xy_);
         RCLCPP_INFO(this->get_logger(), "🎯 角度容差: %.2f rad", goal_tolerance_theta_);
+        RCLCPP_INFO(this->get_logger(), "📏 路径采样间距: %.2f m", path_sampling_distance_);
+        RCLCPP_INFO(this->get_logger(), "🚀 默认最大速度: %.2f m/s", default_max_speed_);
         RCLCPP_INFO(this->get_logger(), "🔧 ================================");
         RCLCPP_INFO(this->get_logger(), "");
 
         // 创建路径转换器
-        path_converter_ = std::make_unique<PathConverter>(robot_id_);
+        path_converter_ = std::make_unique<PathConverter>(robot_id_, path_sampling_distance_, default_max_speed_);
 
         // 创建MQTT客户端
         mqtt_client_ = std::make_unique<zhongli_protocol::ZhongliMqttClient>(
@@ -137,6 +139,8 @@ void ROS2ZhongliBridge::declare_parameters() {
     this->declare_parameter("state_publish_rate", 2.0);
     this->declare_parameter("goal_tolerance_xy", 0.2);
     this->declare_parameter("goal_tolerance_theta", 0.1);
+    this->declare_parameter("path_sampling_distance", 0.5);
+    this->declare_parameter("default_max_speed", 1.5);
 
     // 获取参数值
     robot_id_ = this->get_parameter("robot_id").as_string();
@@ -147,6 +151,8 @@ void ROS2ZhongliBridge::declare_parameters() {
     state_publish_rate_ = this->get_parameter("state_publish_rate").as_double();
     goal_tolerance_xy_ = this->get_parameter("goal_tolerance_xy").as_double();
     goal_tolerance_theta_ = this->get_parameter("goal_tolerance_theta").as_double();
+    path_sampling_distance_ = this->get_parameter("path_sampling_distance").as_double();
+    default_max_speed_ = this->get_parameter("default_max_speed").as_double();
 }
 
 void ROS2ZhongliBridge::create_ros2_interfaces() {
@@ -154,7 +160,7 @@ void ROS2ZhongliBridge::create_ros2_interfaces() {
 
     // 创建订阅器
     path_subscription_ = this->create_subscription<nav_msgs::msg::Path>(
-        "/plan", 10, std::bind(&ROS2ZhongliBridge::path_callback, this, _1));
+        "/plans", 10, std::bind(&ROS2ZhongliBridge::path_callback, this, _1));
 
     map_subscription_ = this->create_subscription<nav_msgs::msg::OccupancyGrid>(
         "/map", 10, std::bind(&ROS2ZhongliBridge::map_callback, this, _1));
@@ -172,6 +178,11 @@ void ROS2ZhongliBridge::create_ros2_interfaces() {
     goal_pose_publisher_ = this->create_publisher<geometry_msgs::msg::PoseStamped>("/goal_pose", 10);
     cmd_vel_publisher_ = this->create_publisher<geometry_msgs::msg::Twist>("/cmd_vel", 10);
     cancel_navigation_publisher_ = this->create_publisher<std_msgs::msg::Bool>("/cancel_navigation", 10);
+
+    // 创建标准导航发布器（符合ROS2导航规范）
+    current_pose_publisher_ = this->create_publisher<geometry_msgs::msg::PoseStamped>("/current_pose", 10);
+    navigation_status_publisher_ = this->create_publisher<action_msgs::msg::GoalStatus>("/navigation_status", 10);
+    navigation_feedback_publisher_ = this->create_publisher<std_msgs::msg::String>("/navigation_feedback", 10);
 
     RCLCPP_INFO(this->get_logger(), "✅ ROS2接口创建完成");
 }
@@ -292,11 +303,112 @@ void ROS2ZhongliBridge::handle_trajectory_status(const zhongli_protocol::Traject
     RCLCPP_INFO(this->get_logger(), "📊 轨迹状态更新: %s - %s",
                 status_msg.trajectoryId.c_str(), status_msg.status.c_str());
 
+    // 更新内部状态
     if (status_msg.status == "completed") {
         goal_reached_ = true;
+        RCLCPP_INFO(this->get_logger(), "🎯 轨迹执行成功完成");
     } else if (status_msg.status == "failed") {
         log_error("轨迹执行失败: " + status_msg.errorDesc);
+        RCLCPP_ERROR(this->get_logger(), "❌ 轨迹执行失败 - 错误码: %d, 描述: %s",
+                     status_msg.errorCode, status_msg.errorDesc.c_str());
     }
+
+    // 发布当前位置信息（符合ROS2导航标准）
+    publish_current_pose_from_trajectory_status(status_msg);
+
+    // 发布导航状态（类似nav2控制器）
+    publish_navigation_status(status_msg);
+
+    // 发布详细的导航反馈信息
+    publish_navigation_feedback(status_msg);
+
+    RCLCPP_INFO(this->get_logger(), "📤 导航状态已发布到ROS2: %s - %s",
+                status_msg.trajectoryId.c_str(), status_msg.status.c_str());
+}
+
+void ROS2ZhongliBridge::publish_current_pose_from_trajectory_status(const zhongli_protocol::TrajectoryStatusMessage& status_msg) {
+    // 尝试获取当前位置，如果轨迹状态包含位置信息则使用，否则从TF获取
+    auto current_pose_opt = get_current_pose();
+    if (current_pose_opt.has_value() && current_pose_publisher_) {
+        auto pose_msg = current_pose_opt.value();
+        // 更新时间戳为轨迹状态的时间戳
+        pose_msg.header.stamp = this->get_clock()->now();
+        pose_msg.header.frame_id = map_frame_;
+
+        current_pose_publisher_->publish(pose_msg);
+
+        RCLCPP_DEBUG(this->get_logger(), "📍 当前位置已发布: (%.2f, %.2f, %.2f)",
+                    pose_msg.pose.position.x, pose_msg.pose.position.y,
+                    pose_msg.pose.orientation.z);
+    }
+}
+
+void ROS2ZhongliBridge::publish_navigation_status(const zhongli_protocol::TrajectoryStatusMessage& status_msg) {
+    if (!navigation_status_publisher_) return;
+
+    auto goal_status = action_msgs::msg::GoalStatus();
+    goal_status.goal_info.stamp = this->get_clock()->now();
+    goal_status.goal_info.goal_id.uuid.fill(0); // 简化的goal_id，实际应用中可以用trajectoryId生成
+
+    // 映射轨迹状态到GoalStatus状态
+    if (status_msg.status == "pending") {
+        goal_status.status = action_msgs::msg::GoalStatus::STATUS_ACCEPTED;
+    } else if (status_msg.status == "running") {
+        goal_status.status = action_msgs::msg::GoalStatus::STATUS_EXECUTING;
+    } else if (status_msg.status == "completed") {
+        goal_status.status = action_msgs::msg::GoalStatus::STATUS_SUCCEEDED;
+    } else if (status_msg.status == "failed") {
+        goal_status.status = action_msgs::msg::GoalStatus::STATUS_ABORTED;
+    } else {
+        goal_status.status = action_msgs::msg::GoalStatus::STATUS_UNKNOWN;
+    }
+
+    navigation_status_publisher_->publish(goal_status);
+
+    std::string status_text = "Navigation " + status_msg.status;
+    if (status_msg.currentPointIndex.has_value()) {
+        status_text += " - Point " + std::to_string(status_msg.currentPointIndex.value());
+    }
+    if (status_msg.status == "failed") {
+        status_text = "Navigation failed: " + status_msg.errorDesc + " (Error code: " + std::to_string(status_msg.errorCode) + ")";
+    }
+
+    RCLCPP_DEBUG(this->get_logger(), "📊 导航状态已发布: %s - %s",
+                status_msg.trajectoryId.c_str(), status_text.c_str());
+}
+
+void ROS2ZhongliBridge::publish_navigation_feedback(const zhongli_protocol::TrajectoryStatusMessage& status_msg) {
+    if (!navigation_feedback_publisher_) return;
+
+    auto feedback_msg = std_msgs::msg::String();
+
+    // 创建结构化的反馈消息（保持与决策树的兼容性）
+    nlohmann::json feedback_json;
+    feedback_json["trajectoryId"] = status_msg.trajectoryId;
+    feedback_json["status"] = status_msg.status;
+    feedback_json["timestamp"] = status_msg.timestamp;
+
+    if (status_msg.currentPointIndex.has_value()) {
+        feedback_json["currentPointIndex"] = status_msg.currentPointIndex.value();
+    }
+
+    if (status_msg.status == "failed") {
+        feedback_json["errorCode"] = status_msg.errorCode;
+        feedback_json["errorDesc"] = status_msg.errorDesc;
+    }
+
+    if (status_msg.finishTime.has_value()) {
+        feedback_json["finishTime"] = status_msg.finishTime.value();
+    }
+
+    if (status_msg.estimatedFinishTime.has_value()) {
+        feedback_json["estimatedFinishTime"] = status_msg.estimatedFinishTime.value();
+    }
+
+    feedback_msg.data = feedback_json.dump();
+    navigation_feedback_publisher_->publish(feedback_msg);
+
+    RCLCPP_DEBUG(this->get_logger(), "💬 导航反馈已发布: %s", feedback_msg.data.c_str());
 }
 
 void ROS2ZhongliBridge::handle_action_status(const zhongli_protocol::ActionStatusMessage& status_msg) {
@@ -329,7 +441,7 @@ zhongli_protocol::DeviceStateMessage ROS2ZhongliBridge::create_device_state_mess
     // 位姿信息
     state_msg.pose.x = current_pose_.pose.pose.position.x;
     state_msg.pose.y = current_pose_.pose.pose.position.y;
-    state_msg.pose.theta = PathConverter::quaternion_to_yaw_degrees(current_pose_.pose.pose.orientation);
+    state_msg.pose.theta = PathConverter::quaternion_to_yaw_radians(current_pose_.pose.pose.orientation);
 
     // 货叉状态（模拟数据）
     state_msg.forkliftState.height = 0.0;
@@ -384,14 +496,14 @@ bool ROS2ZhongliBridge::is_goal_reached(const geometry_msgs::msg::PoseStamped& t
     double dy = target_pose.pose.position.y - current_pose.pose.position.y;
     double distance = std::sqrt(dx * dx + dy * dy);
 
-    // 计算角度差距
-    double target_yaw = PathConverter::quaternion_to_yaw_degrees(target_pose.pose.orientation);
-    double current_yaw = PathConverter::quaternion_to_yaw_degrees(current_pose.pose.orientation);
+    // 计算角度差距（弧度制）
+    double target_yaw = PathConverter::quaternion_to_yaw_radians(target_pose.pose.orientation);
+    double current_yaw = PathConverter::quaternion_to_yaw_radians(current_pose.pose.orientation);
     double angle_diff = std::abs(target_yaw - current_yaw);
 
-    // 处理角度环形差异
-    if (angle_diff > 180.0) {
-        angle_diff = 360.0 - angle_diff;
+    // 处理角度环形差异（弧度制）
+    if (angle_diff > M_PI) {
+        angle_diff = 2.0 * M_PI - angle_diff;
     }
 
     return (distance <= goal_tolerance_xy_) && (angle_diff <= goal_tolerance_theta_ * 180.0 / M_PI);

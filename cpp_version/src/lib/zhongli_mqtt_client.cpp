@@ -210,8 +210,16 @@ void ZhongliMqttClient::on_message_callback(struct mosquitto *mosq, void *obj, c
             TaskMessage task_msg = TaskMessage::from_json(json_msg);
             client->task_callback_(task_msg);
         } else if (topic == client->trajectory_status_subscribe_topic_ && client->trajectory_status_callback_) {
-            // 暂时跳过轨迹状态消息解析
             std::cout << "收到轨迹状态消息: " << json_msg.dump() << std::endl;
+            try {
+                TrajectoryStatusMessage trajectory_msg = TrajectoryStatusMessage::from_json(json_msg);
+                std::cout << "✅ 轨迹状态消息解析成功: " << trajectory_msg.trajectoryId
+                         << " - " << trajectory_msg.status << std::endl;
+                client->trajectory_status_callback_(trajectory_msg);
+            } catch (const std::exception& parse_error) {
+                std::cerr << "❌ 轨迹状态消息解析失败: " << parse_error.what() << std::endl;
+                std::cerr << "   原始JSON: " << json_msg.dump() << std::endl;
+            }
         } else if (topic == client->action_status_subscribe_topic_ && client->action_status_callback_) {
             // 暂时跳过动作状态消息解析
             std::cout << "收到动作状态消息: " << json_msg.dump() << std::endl;

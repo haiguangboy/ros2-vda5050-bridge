@@ -8,6 +8,7 @@
 #include <geometry_msgs/msg/twist.hpp>
 #include <std_msgs/msg/string.hpp>
 #include <std_msgs/msg/bool.hpp>
+#include <action_msgs/msg/goal_status.hpp>
 #include <tf2_ros/buffer.h>
 #include <tf2_ros/transform_listener.h>
 
@@ -82,6 +83,11 @@ private:
     rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr cmd_vel_publisher_;
     rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr cancel_navigation_publisher_;
 
+    // 导航状态发布器（符合ROS2导航标准）
+    rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr current_pose_publisher_;
+    rclcpp::Publisher<action_msgs::msg::GoalStatus>::SharedPtr navigation_status_publisher_;
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr navigation_feedback_publisher_;
+
     // TF2变换
     std::unique_ptr<tf2_ros::Buffer> tf_buffer_;
     std::unique_ptr<tf2_ros::TransformListener> tf_listener_;
@@ -102,6 +108,8 @@ private:
     double state_publish_rate_;
     double goal_tolerance_xy_;
     double goal_tolerance_theta_;
+    double path_sampling_distance_;
+    double default_max_speed_;
 
     // 状态变量
     geometry_msgs::msg::PoseWithCovarianceStamped current_pose_;
@@ -173,6 +181,27 @@ private:
      * @param status_msg 轨迹状态消息
      */
     void handle_trajectory_status(const zhongli_protocol::TrajectoryStatusMessage& status_msg);
+
+    /**
+     * @brief 发布当前位置信息（基于轨迹状态）
+     *
+     * @param status_msg 轨迹状态消息
+     */
+    void publish_current_pose_from_trajectory_status(const zhongli_protocol::TrajectoryStatusMessage& status_msg);
+
+    /**
+     * @brief 发布导航状态（类似nav2控制器）
+     *
+     * @param status_msg 轨迹状态消息
+     */
+    void publish_navigation_status(const zhongli_protocol::TrajectoryStatusMessage& status_msg);
+
+    /**
+     * @brief 发布导航反馈信息
+     *
+     * @param status_msg 轨迹状态消息
+     */
+    void publish_navigation_feedback(const zhongli_protocol::TrajectoryStatusMessage& status_msg);
 
     /**
      * @brief 动作状态回调

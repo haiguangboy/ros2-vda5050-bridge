@@ -48,12 +48,12 @@ public:
         const geometry_msgs::msg::PoseStamped& pose_stamped);
 
     /**
-     * @brief 四元数转换为欧拉角（度）
+     * @brief 四元数转换为欧拉角（弧度）
      *
      * @param quaternion 四元数
-     * @return double 偏航角（度）
+     * @return double 偏航角（弧度，范围：-π到+π）
      */
-    static double quaternion_to_yaw_degrees(const geometry_msgs::msg::Quaternion& quaternion);
+    static double quaternion_to_yaw_radians(const geometry_msgs::msg::Quaternion& quaternion);
 
     /**
      * @brief 路径采样优化

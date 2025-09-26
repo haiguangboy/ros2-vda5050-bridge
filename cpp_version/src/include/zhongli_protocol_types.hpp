@@ -17,7 +17,7 @@ namespace zhongli_protocol {
 struct Pose {
     double x;
     double y;
-    double theta;  ///< 单位：度
+    double theta;  ///< 单位：弧度（范围：-π到+π）
 
     nlohmann::json to_json() const {
         return nlohmann::json{
@@ -43,7 +43,7 @@ struct ContainerPose {
     double x;
     double y;
     double z;
-    double theta;  ///< 单位：度
+    double theta;  ///< 单位：弧度（范围：-π到+π）
 
     nlohmann::json to_json() const {
         return nlohmann::json{
@@ -151,7 +151,7 @@ struct ErrorInfo {
 struct TrajectoryPoint {
     double x;
     double y;
-    double theta;  ///< 单位：度
+    double theta;  ///< 单位：弧度（范围：-π到+π）
 
     nlohmann::json to_json() const {
         return nlohmann::json{
@@ -243,6 +243,58 @@ struct TrajectoryStatusMessage {
         }
 
         return j.dump(2);
+    }
+
+    static TrajectoryStatusMessage from_json(const nlohmann::json& j) {
+        TrajectoryStatusMessage msg;
+        msg.timestamp = j.at("timestamp").get<std::string>();
+        msg.trajectoryId = j.at("trajectoryId").get<std::string>();
+
+        // 支持两种状态字段格式：新格式用"status"，旧格式用"trajectoryStatus"
+        if (j.contains("status")) {
+            msg.status = j.at("status").get<std::string>();
+        } else if (j.contains("trajectoryStatus")) {
+            std::string trajectory_status = j.at("trajectoryStatus").get<std::string>();
+            // 映射旧格式状态到新格式
+            if (trajectory_status == "FINISHED" || trajectory_status == "COMPLETED") {
+                msg.status = "completed";
+            } else if (trajectory_status == "RUNNING" || trajectory_status == "EXECUTING") {
+                msg.status = "running";
+            } else if (trajectory_status == "FAILED" || trajectory_status == "ERROR") {
+                msg.status = "failed";
+            } else if (trajectory_status == "PENDING" || trajectory_status == "ACCEPTED") {
+                msg.status = "pending";
+            } else {
+                msg.status = trajectory_status; // 保持原样
+            }
+        } else {
+            msg.status = "unknown";
+        }
+
+        msg.errorCode = j.value("errorCode", 0);
+        msg.errorDesc = j.value("errorDesc", std::string(""));
+
+        // 支持resultDescription作为错误描述的备选
+        if (msg.errorDesc.empty() && j.contains("resultDescription")) {
+            msg.errorDesc = j.at("resultDescription").get<std::string>();
+        }
+
+        // 支持两种当前位置格式
+        if (j.contains("currentPointIndex")) {
+            msg.currentPointIndex = j.at("currentPointIndex").get<int>();
+        } else if (j.contains("currentPosition")) {
+            // 如果有currentPosition对象，我们可以提取一些信息但不直接转换为索引
+            // 这里暂时不设置currentPointIndex，因为位置坐标不等同于点索引
+        }
+
+        if (j.contains("estimatedFinishTime")) {
+            msg.estimatedFinishTime = j.at("estimatedFinishTime").get<std::string>();
+        }
+        if (j.contains("finishTime")) {
+            msg.finishTime = j.at("finishTime").get<std::string>();
+        }
+
+        return msg;
     }
 };
 

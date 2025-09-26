@@ -60,12 +60,12 @@ zhongli_protocol::TrajectoryPoint PathConverter::convert_pose_to_trajectory_poin
     zhongli_protocol::TrajectoryPoint point;
     point.x = pose_stamped.pose.position.x;
     point.y = pose_stamped.pose.position.y;
-    point.theta = quaternion_to_yaw_degrees(pose_stamped.pose.orientation);
+    point.theta = quaternion_to_yaw_radians(pose_stamped.pose.orientation);
 
     return point;
 }
 
-double PathConverter::quaternion_to_yaw_degrees(
+double PathConverter::quaternion_to_yaw_radians(
     const geometry_msgs::msg::Quaternion& quaternion) {
 
     // 使用tf2进行四元数到欧拉角转换
@@ -76,14 +76,11 @@ double PathConverter::quaternion_to_yaw_degrees(
     double roll, pitch, yaw;
     tf2::Matrix3x3(tf_quaternion).getRPY(roll, pitch, yaw);
 
-    // 转换为度
-    double yaw_degrees = yaw * 180.0 / M_PI;
+    // 确保角度在-π到+π弧度范围内
+    while (yaw < -M_PI) yaw += 2.0 * M_PI;
+    while (yaw >= M_PI) yaw -= 2.0 * M_PI;
 
-    // 确保角度在0-360度范围内
-    while (yaw_degrees < 0.0) yaw_degrees += 360.0;
-    while (yaw_degrees >= 360.0) yaw_degrees -= 360.0;
-
-    return yaw_degrees;
+    return yaw;
 }
 
 std::vector<zhongli_protocol::TrajectoryPoint> PathConverter::sample_trajectory_points(
@@ -151,8 +148,8 @@ bool PathConverter::validate_trajectory(
             return false;
         }
 
-        // 检查角度范围
-        if (point.theta < 0.0 || point.theta >= 360.0) {
+        // 检查角度范围（弧度制：-π到+π）
+        if (point.theta < -M_PI || point.theta > M_PI) {
             return false;
         }
     }
