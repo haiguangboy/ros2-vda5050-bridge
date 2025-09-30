@@ -7,10 +7,8 @@
 namespace zhongli_bridge {
 
 PathConverter::PathConverter(const std::string& robot_id,
-                           double sampling_distance,
                            double default_speed)
     : robot_id_(robot_id)
-    , sampling_distance_(sampling_distance)
     , default_speed_(default_speed)
     , total_conversions_(0)
     , total_original_points_(0)
@@ -32,23 +30,19 @@ zhongli_protocol::TrajectoryMessage PathConverter::convert_path_to_trajectory(
         trajectory_points.push_back(convert_pose_to_trajectory_point(pose_stamped));
     }
 
-    // 路径采样优化
-    std::vector<zhongli_protocol::TrajectoryPoint> sampled_points =
-        sample_trajectory_points(trajectory_points);
-
     // 验证轨迹有效性
-    if (!validate_trajectory(sampled_points)) {
+    if (!validate_trajectory(trajectory_points)) {
         throw std::runtime_error("Generated trajectory is invalid");
     }
 
     // 更新统计信息
-    update_stats(trajectory_points.size(), sampled_points.size());
+    update_stats(trajectory_points.size(), trajectory_points.size());
 
     // 创建轨迹消息
     zhongli_protocol::TrajectoryMessage trajectory;
     trajectory.timestamp = zhongli_protocol::create_timestamp();
     trajectory.trajectoryId = zhongli_protocol::generate_trajectory_id(robot_id_);
-    trajectory.trajectoryPoints = sampled_points;
+    trajectory.trajectoryPoints = trajectory_points;
     trajectory.maxSpeed = default_speed_;
 
     return trajectory;
@@ -83,41 +77,6 @@ double PathConverter::quaternion_to_yaw_radians(
     return yaw;
 }
 
-std::vector<zhongli_protocol::TrajectoryPoint> PathConverter::sample_trajectory_points(
-    const std::vector<zhongli_protocol::TrajectoryPoint>& original_points) {
-
-    if (original_points.empty()) {
-        return {};
-    }
-
-    if (original_points.size() == 1) {
-        return original_points;
-    }
-
-    std::vector<zhongli_protocol::TrajectoryPoint> sampled_points;
-    sampled_points.push_back(original_points[0]); // 总是包含起点
-
-    double accumulated_distance = 0.0;
-
-    for (size_t i = 1; i < original_points.size(); ++i) {
-        double distance = calculate_distance(original_points[i-1], original_points[i]);
-        accumulated_distance += distance;
-
-        // 如果累积距离达到采样间距，添加当前点
-        if (accumulated_distance >= sampling_distance_) {
-            sampled_points.push_back(original_points[i]);
-            accumulated_distance = 0.0;
-        }
-    }
-
-    // 总是包含终点（如果不是最后添加的点）
-    if (sampled_points.size() < 2 ||
-        calculate_distance(sampled_points.back(), original_points.back()) > 0.01) {
-        sampled_points.push_back(original_points.back());
-    }
-
-    return sampled_points;
-}
 
 double PathConverter::calculate_distance(
     const zhongli_protocol::TrajectoryPoint& p1,

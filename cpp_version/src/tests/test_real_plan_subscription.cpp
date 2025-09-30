@@ -20,7 +20,7 @@ public:
 
         // 创建路径转换器
         robot_id_ = "test-robot-001";
-        path_converter_ = std::make_unique<PathConverter>(robot_id_, 0.5, 1.5);
+        path_converter_ = std::make_unique<PathConverter>(robot_id_, 1.5);
 
         // 订阅真实的/plan话题
         path_subscription_ = this->create_subscription<nav_msgs::msg::Path>(

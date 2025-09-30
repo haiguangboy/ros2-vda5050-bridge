@@ -1,6 +1,7 @@
 #include "ros2_zhongli_bridge.hpp"
-#include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
 #include <cmath>
+#include <tf2/LinearMath/Quaternion.h>
+#include <tf2/LinearMath/Matrix3x3.h>
 
 namespace zhongli_bridge {
 
@@ -14,10 +15,6 @@ ROS2ZhongliBridge::ROS2ZhongliBridge(const rclcpp::NodeOptions& node_options)
 
     // 声明参数
     declare_parameters();
-
-    // 初始化TF2
-    tf_buffer_ = std::make_unique<tf2_ros::Buffer>(this->get_clock());
-    tf_listener_ = std::make_unique<tf2_ros::TransformListener>(*tf_buffer_);
 }
 
 ROS2ZhongliBridge::~ROS2ZhongliBridge() {
@@ -37,13 +34,12 @@ bool ROS2ZhongliBridge::initialize() {
         RCLCPP_INFO(this->get_logger(), "📊 状态发布频率: %.1f Hz", state_publish_rate_);
         RCLCPP_INFO(this->get_logger(), "🎯 位置容差: %.2f m", goal_tolerance_xy_);
         RCLCPP_INFO(this->get_logger(), "🎯 角度容差: %.2f rad", goal_tolerance_theta_);
-        RCLCPP_INFO(this->get_logger(), "📏 路径采样间距: %.2f m", path_sampling_distance_);
         RCLCPP_INFO(this->get_logger(), "🚀 默认最大速度: %.2f m/s", default_max_speed_);
         RCLCPP_INFO(this->get_logger(), "🔧 ================================");
         RCLCPP_INFO(this->get_logger(), "");
 
         // 创建路径转换器
-        path_converter_ = std::make_unique<PathConverter>(robot_id_, path_sampling_distance_, default_max_speed_);
+        path_converter_ = std::make_unique<PathConverter>(robot_id_, default_max_speed_);
 
         // 创建MQTT客户端
         mqtt_client_ = std::make_unique<zhongli_protocol::ZhongliMqttClient>(
@@ -139,7 +135,6 @@ void ROS2ZhongliBridge::declare_parameters() {
     this->declare_parameter("state_publish_rate", 2.0);
     this->declare_parameter("goal_tolerance_xy", 0.2);
     this->declare_parameter("goal_tolerance_theta", 0.1);
-    this->declare_parameter("path_sampling_distance", 0.5);
     this->declare_parameter("default_max_speed", 1.5);
 
     // 获取参数值
@@ -151,7 +146,6 @@ void ROS2ZhongliBridge::declare_parameters() {
     state_publish_rate_ = this->get_parameter("state_publish_rate").as_double();
     goal_tolerance_xy_ = this->get_parameter("goal_tolerance_xy").as_double();
     goal_tolerance_theta_ = this->get_parameter("goal_tolerance_theta").as_double();
-    path_sampling_distance_ = this->get_parameter("path_sampling_distance").as_double();
     default_max_speed_ = this->get_parameter("default_max_speed").as_double();
 }
 
@@ -173,6 +167,12 @@ void ROS2ZhongliBridge::create_ros2_interfaces() {
 
     navigation_result_subscription_ = this->create_subscription<std_msgs::msg::String>(
         "/navigation_result", 10, std::bind(&ROS2ZhongliBridge::navigation_result_callback, this, _1));
+
+    odom_subscription_ = this->create_subscription<nav_msgs::msg::Odometry>(
+        "/Odom", 50, std::bind(&ROS2ZhongliBridge::odom_callback, this, _1));
+
+    container_pose_subscription_ = this->create_subscription<geometry_msgs::msg::PoseStamped>(
+        "/container_pose", 10, std::bind(&ROS2ZhongliBridge::container_pose_callback, this, _1));
 
     // 创建发布器
     goal_pose_publisher_ = this->create_publisher<geometry_msgs::msg::PoseStamped>("/goal_pose", 10);
@@ -248,6 +248,63 @@ void ROS2ZhongliBridge::navigation_result_callback(const std_msgs::msg::String::
 
     if (msg->data == "success") {
         goal_reached_ = true;
+    }
+}
+
+void ROS2ZhongliBridge::odom_callback(const nav_msgs::msg::Odometry::SharedPtr msg) {
+    // 更新当前位姿信息
+    current_pose_.header = msg->header;
+    current_pose_.pose = msg->pose;
+
+    // 更新当前速度信息
+    current_velocity_ = msg->twist.twist;
+}
+
+void ROS2ZhongliBridge::container_pose_callback(const geometry_msgs::msg::PoseStamped::SharedPtr msg) {
+    try {
+        RCLCPP_INFO(this->get_logger(), "📦 收到容器位姿: 位置=(%.2f, %.2f, %.2f)",
+                    msg->pose.position.x, msg->pose.position.y, msg->pose.position.z);
+
+        // 将四元数转换为欧拉角
+        tf2::Quaternion q(
+            msg->pose.orientation.x,
+            msg->pose.orientation.y,
+            msg->pose.orientation.z,
+            msg->pose.orientation.w
+        );
+
+        tf2::Matrix3x3 m(q);
+        double roll, pitch, yaw;
+        m.getRPY(roll, pitch, yaw);
+
+        // 创建容器位姿
+        zhongli_protocol::ContainerPose container_pose;
+        container_pose.x = msg->pose.position.x;
+        container_pose.y = msg->pose.position.y;
+        container_pose.z = msg->pose.position.z;
+        container_pose.theta = yaw;  // 使用yaw作为主要旋转角度（弧度制）
+        container_pose.width = 1.2;  // 默认容器宽度1.2米（根据协议文档）
+
+        // 创建动作消息
+        zhongli_protocol::ActionMessage action_msg;
+        action_msg.timestamp = zhongli_protocol::create_timestamp();
+        action_msg.actionId = zhongli_protocol::generate_action_id(robot_id_);
+        action_msg.actionType = "ground_place";  // 示例动作类型：地面放置
+        action_msg.containerPose = container_pose;
+        action_msg.containerType = "standard_pallet";  // 示例容器类型
+
+        // 通过MQTT发布动作消息
+        if (mqtt_client_ && mqtt_client_->publish_action(action_msg)) {
+            RCLCPP_INFO(this->get_logger(), "✅ 动作消息已发布: %s (容器位置: %.2f, %.2f, %.2f, 角度: %.2f°)",
+                        action_msg.actionId.c_str(),
+                        container_pose.x, container_pose.y, container_pose.z,
+                        yaw * 180.0 / M_PI);
+        } else {
+            RCLCPP_ERROR(this->get_logger(), "❌ 动作消息发布失败");
+        }
+
+    } catch (const std::exception& e) {
+        log_error("容器位姿处理失败: " + std::string(e.what()));
     }
 }
 
@@ -510,22 +567,16 @@ bool ROS2ZhongliBridge::is_goal_reached(const geometry_msgs::msg::PoseStamped& t
 }
 
 std::optional<geometry_msgs::msg::PoseStamped> ROS2ZhongliBridge::get_current_pose() {
-    try {
-        auto transform = tf_buffer_->lookupTransform(map_frame_, base_frame_, tf2::TimePointZero);
-
-        geometry_msgs::msg::PoseStamped pose;
-        pose.header.frame_id = map_frame_;
-        pose.header.stamp = this->get_clock()->now();
-        pose.pose.position.x = transform.transform.translation.x;
-        pose.pose.position.y = transform.transform.translation.y;
-        pose.pose.position.z = transform.transform.translation.z;
-        pose.pose.orientation = transform.transform.rotation;
-
-        return pose;
-    } catch (const tf2::TransformException& e) {
-        log_error("TF2查找失败: " + std::string(e.what()));
+    // 检查是否有有效的里程计数据
+    if (current_pose_.header.frame_id.empty()) {
         return std::nullopt;
     }
+
+    geometry_msgs::msg::PoseStamped pose;
+    pose.header = current_pose_.header;
+    pose.pose = current_pose_.pose.pose;  // 从PoseWithCovariance中提取Pose
+
+    return pose;
 }
 
 void ROS2ZhongliBridge::log_debug(const std::string& message) {

@@ -44,13 +44,15 @@ struct ContainerPose {
     double y;
     double z;
     double theta;  ///< 单位：弧度（范围：-π到+π）
+    double width;  ///< 容器宽度，单位：米
 
     nlohmann::json to_json() const {
         return nlohmann::json{
             {"x", x},
             {"y", y},
             {"z", z},
-            {"theta", theta}
+            {"theta", theta},
+            {"width", width}
         };
     }
 
@@ -59,7 +61,8 @@ struct ContainerPose {
             j.at("x").get<double>(),
             j.at("y").get<double>(),
             j.at("z").get<double>(),
-            j.at("theta").get<double>()
+            j.at("theta").get<double>(),
+            j.at("width").get<double>()
         };
     }
 };
@@ -304,7 +307,7 @@ struct TrajectoryStatusMessage {
 struct ActionMessage {
     std::string timestamp;
     std::string actionId;
-    std::string actionType;  ///< ground_pick/ground_place/load/unload
+    std::string actionType;  ///< ground_pick/ground_place/load/unload/pub_params
     std::optional<ContainerPose> containerPose;
     std::optional<std::string> containerType;
 
@@ -381,9 +384,9 @@ struct TaskMessage {
     std::string timestamp;
     std::string taskId;
     std::string startArea;
-    std::string startAction;   ///< ground_pick/ground_place/load/unload
+    std::string startAction;   ///< ground_pick/ground_place/load/unload/pub_params
     std::string targetArea;
-    std::string targetAction;  ///< ground_pick/ground_place/load/unload
+    std::string targetAction;  ///< ground_pick/ground_place/load/unload/pub_params
 
     std::string to_json_string() const {
         nlohmann::json j = {

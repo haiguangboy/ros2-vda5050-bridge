@@ -92,7 +92,7 @@ int main() {
         point.id = "point-" + std::to_string(i);
         point.x = i * 1.0;
         point.y = i * 0.5;
-        point.theta = i * 30.0;  // 每点旋转30度
+        point.theta = i * M_PI / 6.0;  // 每点旋转π/6弧度（30度）
         point.speed = 1.0;
         point.actions.push_back("wait:1000");  // 等待1秒
         trajectory.trajectoryPoints.push_back(point);

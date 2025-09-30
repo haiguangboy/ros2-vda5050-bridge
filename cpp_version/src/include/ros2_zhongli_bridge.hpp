@@ -3,14 +3,13 @@
 #include <rclcpp/rclcpp.hpp>
 #include <nav_msgs/msg/path.hpp>
 #include <nav_msgs/msg/occupancy_grid.hpp>
+#include <nav_msgs/msg/odometry.hpp>
 #include <geometry_msgs/msg/pose_stamped.hpp>
 #include <geometry_msgs/msg/pose_with_covariance_stamped.hpp>
 #include <geometry_msgs/msg/twist.hpp>
 #include <std_msgs/msg/string.hpp>
 #include <std_msgs/msg/bool.hpp>
 #include <action_msgs/msg/goal_status.hpp>
-#include <tf2_ros/buffer.h>
-#include <tf2_ros/transform_listener.h>
 
 #include "zhongli_protocol_types.hpp"
 #include "zhongli_mqtt_client.hpp"
@@ -77,6 +76,8 @@ private:
     rclcpp::Subscription<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr pose_subscription_;
     rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr cmd_vel_subscription_;
     rclcpp::Subscription<std_msgs::msg::String>::SharedPtr navigation_result_subscription_;
+    rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_subscription_;
+    rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr container_pose_subscription_;
 
     // ROS2发布器
     rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr goal_pose_publisher_;
@@ -88,9 +89,6 @@ private:
     rclcpp::Publisher<action_msgs::msg::GoalStatus>::SharedPtr navigation_status_publisher_;
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr navigation_feedback_publisher_;
 
-    // TF2变换
-    std::unique_ptr<tf2_ros::Buffer> tf_buffer_;
-    std::unique_ptr<tf2_ros::TransformListener> tf_listener_;
 
     // 核心组件
     std::unique_ptr<zhongli_protocol::ZhongliMqttClient> mqtt_client_;
@@ -108,7 +106,6 @@ private:
     double state_publish_rate_;
     double goal_tolerance_xy_;
     double goal_tolerance_theta_;
-    double path_sampling_distance_;
     double default_max_speed_;
 
     // 状态变量
@@ -165,6 +162,20 @@ private:
      * @param msg 导航结果消息
      */
     void navigation_result_callback(const std_msgs::msg::String::SharedPtr msg);
+
+    /**
+     * @brief 里程计消息回调
+     *
+     * @param msg 里程计消息
+     */
+    void odom_callback(const nav_msgs::msg::Odometry::SharedPtr msg);
+
+    /**
+     * @brief 容器位姿消息回调
+     *
+     * @param msg 容器位姿消息
+     */
+    void container_pose_callback(const geometry_msgs::msg::PoseStamped::SharedPtr msg);
 
     // MQTT消息回调函数
 

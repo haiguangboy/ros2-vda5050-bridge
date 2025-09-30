@@ -22,11 +22,9 @@ public:
      * @brief 构造函数
      *
      * @param robot_id 机器人ID
-     * @param sampling_distance 路径采样间距（米）
      * @param default_speed 默认最大速度（米/秒）
      */
     PathConverter(const std::string& robot_id,
-                  double sampling_distance = 0.5,
                   double default_speed = 1.5);
 
     /**
@@ -55,14 +53,6 @@ public:
      */
     static double quaternion_to_yaw_radians(const geometry_msgs::msg::Quaternion& quaternion);
 
-    /**
-     * @brief 路径采样优化
-     *
-     * @param original_points 原始轨迹点
-     * @return std::vector<zhongli_protocol::TrajectoryPoint> 采样后的轨迹点
-     */
-    std::vector<zhongli_protocol::TrajectoryPoint> sample_trajectory_points(
-        const std::vector<zhongli_protocol::TrajectoryPoint>& original_points);
 
     /**
      * @brief 计算两点间距离
@@ -83,12 +73,6 @@ public:
      */
     bool validate_trajectory(const std::vector<zhongli_protocol::TrajectoryPoint>& trajectory_points);
 
-    /**
-     * @brief 设置采样间距
-     *
-     * @param distance 采样间距（米）
-     */
-    void set_sampling_distance(double distance) { sampling_distance_ = distance; }
 
     /**
      * @brief 设置默认速度
@@ -106,7 +90,6 @@ public:
 
 private:
     std::string robot_id_;
-    double sampling_distance_;  ///< 路径采样间距
     double default_speed_;      ///< 默认最大速度
 
     // 统计信息
