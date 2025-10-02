@@ -149,27 +149,85 @@ struct ErrorInfo {
 };
 
 /**
+ * @brief 轨迹点上的动作信息
+ */
+struct TrajectoryAction {
+    std::string actionType;                                ///< 动作类型
+    std::optional<std::string> containerType;             ///< 容器类型（可选）
+    std::optional<ContainerPose> containerPose;           ///< 容器位姿（可选）
+
+    nlohmann::json to_json() const {
+        nlohmann::json j = {
+            {"actionType", actionType}
+        };
+
+        if (containerType.has_value()) {
+            j["containerType"] = containerType.value();
+        }
+        if (containerPose.has_value()) {
+            j["containerPose"] = containerPose.value().to_json();
+        }
+
+        return j;
+    }
+
+    static TrajectoryAction from_json(const nlohmann::json& j) {
+        TrajectoryAction action;
+        action.actionType = j.at("actionType").get<std::string>();
+
+        if (j.contains("containerType")) {
+            action.containerType = j.at("containerType").get<std::string>();
+        }
+        if (j.contains("containerPose")) {
+            action.containerPose = ContainerPose::from_json(j.at("containerPose"));
+        }
+
+        return action;
+    }
+};
+
+/**
  * @brief 轨迹点
  */
 struct TrajectoryPoint {
-    double x;
-    double y;
-    double theta;  ///< 单位：弧度（范围：-π到+π）
+    double x;                                              ///< X坐标，单位：米
+    double y;                                              ///< Y坐标，单位：米
+    double theta;                                          ///< 轨迹点航向角，单位：弧度（范围：-π到+π）
+    double orientation;                                    ///< 运动方向，0:前向运动 -3.14:倒车 3.14:倒车
+    double flag;                                           ///< 进入分支标志位，0:非进入分支 1:进行分支
+    std::optional<TrajectoryAction> action;                ///< 该轨迹点上的动作（可选）
 
     nlohmann::json to_json() const {
-        return nlohmann::json{
+        nlohmann::json j = {
             {"x", x},
             {"y", y},
-            {"theta", theta}
+            {"theta", theta},
+            {"orientation", orientation},
+            {"flag", flag}
         };
+
+        if (action.has_value()) {
+            j["action"] = action.value().to_json();
+        } else {
+            j["action"] = nullptr;
+        }
+
+        return j;
     }
 
     static TrajectoryPoint from_json(const nlohmann::json& j) {
-        return TrajectoryPoint{
-            j.at("x").get<double>(),
-            j.at("y").get<double>(),
-            j.at("theta").get<double>()
-        };
+        TrajectoryPoint point;
+        point.x = j.at("x").get<double>();
+        point.y = j.at("y").get<double>();
+        point.theta = j.at("theta").get<double>();
+        point.orientation = j.value("orientation", 0.0);
+        point.flag = j.value("flag", 0.0);
+
+        if (j.contains("action") && !j.at("action").is_null()) {
+            point.action = TrajectoryAction::from_json(j.at("action"));
+        }
+
+        return point;
     }
 };
 

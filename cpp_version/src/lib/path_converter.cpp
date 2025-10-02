@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <sstream>
 #include <iomanip>
+#include <vector>
 
 namespace zhongli_bridge {
 
@@ -22,12 +23,19 @@ zhongli_protocol::TrajectoryMessage PathConverter::convert_path_to_trajectory(
         throw std::invalid_argument("Cannot convert empty path to trajectory");
     }
 
+    // 解析frame_id中的beta-3信息
+    auto beta3_info = parse_beta3_info_from_frame_id(ros_path.header.frame_id);
+
     // 转换所有路径点
     std::vector<zhongli_protocol::TrajectoryPoint> trajectory_points;
     trajectory_points.reserve(ros_path.poses.size());
 
     for (const auto& pose_stamped : ros_path.poses) {
-        trajectory_points.push_back(convert_pose_to_trajectory_point(pose_stamped));
+        auto point = convert_pose_to_trajectory_point(pose_stamped);
+        // 应用beta-3信息
+        point.orientation = beta3_info.orientation;
+        point.flag = beta3_info.flag;
+        trajectory_points.push_back(point);
     }
 
     // 验证轨迹有效性
@@ -55,6 +63,23 @@ zhongli_protocol::TrajectoryPoint PathConverter::convert_pose_to_trajectory_poin
     point.x = pose_stamped.pose.position.x;
     point.y = pose_stamped.pose.position.y;
     point.theta = quaternion_to_yaw_radians(pose_stamped.pose.orientation);
+    point.orientation = 0.0;  // 默认前向运动
+    point.flag = 0.0;         // 默认非进入分支
+
+    return point;
+}
+
+zhongli_protocol::TrajectoryPoint PathConverter::convert_pose_to_trajectory_point_with_action(
+    const geometry_msgs::msg::PoseStamped& pose_stamped,
+    const std::optional<zhongli_protocol::TrajectoryAction>& action) {
+
+    zhongli_protocol::TrajectoryPoint point;
+    point.x = pose_stamped.pose.position.x;
+    point.y = pose_stamped.pose.position.y;
+    point.theta = quaternion_to_yaw_radians(pose_stamped.pose.orientation);
+    point.orientation = 0.0;  // 默认前向运动
+    point.flag = 0.0;         // 默认非进入分支
+    point.action = action;
 
     return point;
 }
@@ -149,6 +174,46 @@ void PathConverter::update_stats(size_t original_count, size_t sampled_count) co
     ++total_conversions_;
     total_original_points_ += original_count;
     total_sampled_points_ += sampled_count;
+}
+
+PathConverter::Beta3Info PathConverter::parse_beta3_info_from_frame_id(const std::string& frame_id) {
+    Beta3Info info;
+    info.orientation = 0.0;  // 默认前向
+    info.flag = 0.0;         // 默认非分支
+    info.action_type = "";
+    info.container_type = "";
+
+    // 解析格式: "map|action_type|container_type|orientation|flag|container_x|container_y|container_z|container_theta|container_width"
+    std::vector<std::string> parts;
+    std::stringstream ss(frame_id);
+    std::string item;
+
+    while (std::getline(ss, item, '|')) {
+        parts.push_back(item);
+    }
+
+    if (parts.size() >= 5) {
+        try {
+            info.action_type = parts[1];
+            info.container_type = parts[2];
+            info.orientation = std::stod(parts[3]);
+            info.flag = std::stod(parts[4]);
+
+            // 如果有扩展的容器位姿信息，可以在这里解析
+            // if (parts.size() >= 10) {
+            //     double container_x = std::stod(parts[5]);
+            //     double container_y = std::stod(parts[6]);
+            //     double container_z = std::stod(parts[7]);
+            //     double container_theta = std::stod(parts[8]);
+            //     double container_width = std::stod(parts[9]);
+            //     // 可以创建动作信息并赋给轨迹点
+            // }
+        } catch (const std::exception& e) {
+            // 解析失败，使用默认值
+        }
+    }
+
+    return info;
 }
 
 // 路径工具函数实现

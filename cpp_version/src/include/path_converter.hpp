@@ -46,6 +46,17 @@ public:
         const geometry_msgs::msg::PoseStamped& pose_stamped);
 
     /**
+     * @brief 将ROS2姿态转换为带动作的中力协议轨迹点
+     *
+     * @param pose_stamped ROS2姿态
+     * @param action 轨迹动作（可选）
+     * @return zhongli_protocol::TrajectoryPoint 轨迹点
+     */
+    zhongli_protocol::TrajectoryPoint convert_pose_to_trajectory_point_with_action(
+        const geometry_msgs::msg::PoseStamped& pose_stamped,
+        const std::optional<zhongli_protocol::TrajectoryAction>& action);
+
+    /**
      * @brief 四元数转换为欧拉角（弧度）
      *
      * @param quaternion 四元数
@@ -89,6 +100,23 @@ public:
     std::string get_conversion_stats() const;
 
 private:
+    /**
+     * @brief Beta-3协议特定信息结构
+     */
+    struct Beta3Info {
+        double orientation;      ///< 运动方向
+        double flag;            ///< 分支标志
+        std::string action_type;        ///< 动作类型
+        std::string container_type;     ///< 容器类型
+    };
+
+    /**
+     * @brief 从frame_id解析beta-3特定信息
+     *
+     * @param frame_id ROS2消息的frame_id
+     * @return Beta3Info 解析出的beta-3信息
+     */
+    Beta3Info parse_beta3_info_from_frame_id(const std::string& frame_id);
     std::string robot_id_;
     double default_speed_;      ///< 默认最大速度
 
