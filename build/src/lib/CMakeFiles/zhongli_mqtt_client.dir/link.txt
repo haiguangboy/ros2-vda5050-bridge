@@ -1,1 +1,0 @@
-/usr/bin/c++ -fPIC -g -shared -Wl,-soname,libzhongli_mqtt_client.so -o libzhongli_mqtt_client.so CMakeFiles/zhongli_mqtt_client.dir/zhongli_mqtt_client.cpp.o  -Wl,-rpath,/home/yhg/Documents/docs/zhongli/cpp_version/build/src/lib: libzhongli_protocol_types.so -lmosquitto 
