@@ -1,300 +1,332 @@
 #!/usr/bin/env python3
 """
-测试beta-3增强型轨迹工作流程（包含orientation和flag字段）
+Beta-3协议增强型轨迹工作流程测试
 
-该脚本测试完整的beta-3轨迹数据流：
-1. 发布包含新字段的ROS2路径数据
-2. 桥接器接收路径并转换为TrajectoryMessage（包含orientation和flag字段）
-3. TrajectoryMessage通过MQTT发布
-4. 监听并验证收到的轨迹消息包含正确的新字段和动作参数
+测试说明：
+- 支持灵活配置的两条轨迹测试
+- 10秒等待/Odom话题，超时使用默认位置
+- 严格遵循Beta-3协议：flag只使用0或1，orientation使用0或±3.14
+- 原地转弯只发布起点和终点（x,y不变，只有yaw变化）
 """
 
 import rclpy
 from rclpy.node import Node
 import paho.mqtt.client as mqtt
 import json
-import threading
 import time
 import signal
 import sys
 from nav_msgs.msg import Path, Odometry
-from geometry_msgs.msg import PoseStamped, Quaternion
-from std_msgs.msg import Header
+from geometry_msgs.msg import PoseStamped, Quaternion, Pose
+from std_msgs.msg import Header, String
 import math
 
 
-class Beta3TrajectoryWorkflowTester(Node):
+# ==================== 配置参数 ====================
+
+# 轨迹开关
+ENABLE_TRAJECTORY1 = True    # 是否发布第一条轨迹
+ENABLE_TRAJECTORY2 = False    # 是否发布第二条轨迹
+
+# 第一条轨迹配置（orientation=0.0, flag=0）
+TRAJ1_FORWARD_DISTANCE = 3.0     # 直行距离（米）
+TRAJ1_FORWARD_POINTS = 10        # 直行路径点数量
+TRAJ1_RIGHT_TURN_ANGLE = -math.pi / 2  # 右转角度（弧度）
+TRAJ1_RIGHT_TURN_STEPS = 2       # 右转分几步完成（含起点终点）
+TRAJ1_PAUSE_TIME = 2.0           # 停顿时间（秒），用一个点表示
+TRAJ1_LEFT_TURN_ANGLE = math.pi / 2   # 左转角度（弧度）
+TRAJ1_LEFT_TURN_STEPS = 2        # 左转分几步完成（含起点终点）
+TRAJ1_FINAL_FORWARD = 0.5        # 最后直行距离（米）
+TRAJ1_FINAL_FORWARD_POINTS = 3   # 最后直行点数量
+
+# 第二条轨迹配置（orientation=3.14, flag=1）
+TRAJ2_LEFT_TURN_ANGLE = math.pi / 2    # 左转角度（弧度）
+TRAJ2_LEFT_TURN_STEPS = 2        # 左转分几步完成（含起点终点）
+TRAJ2_BACKWARD_DISTANCE = 0.5    # 倒车距离（米）
+TRAJ2_BACKWARD_POINTS = 3        # 倒车路径点数量
+
+# 容器位姿配置（第二条轨迹）
+CONTAINER_TYPE = "AGV-T300"
+CONTAINER_OFFSET_X = 1.0         # 容器相对轨迹终点的X偏移
+CONTAINER_OFFSET_Y = 1.0         # 容器相对轨迹终点的Y偏移
+CONTAINER_Z = 0.1                # 容器高度
+CONTAINER_THETA = 0.0            # 容器朝向
+CONTAINER_WIDTH = 1.2            # 容器宽度
+
+# MQTT配置
+MQTT_BROKER = "localhost"
+MQTT_PORT = 1883
+ROBOT_ID = "robot-001"
+
+# ROS2配置
+ODOM_TOPIC = "/Odom"
+PATH_TOPIC = "/plans"
+ODOM_TIMEOUT = 10.0              # 等待Odom超时时间（秒）
+
+# 默认位置（Odom超时时使用）
+DEFAULT_X = 0.0
+DEFAULT_Y = 0.0
+DEFAULT_YAW = 0.0
+
+# 轨迹间隔时间
+TRAJECTORY_INTERVAL = 5.0        # 两条轨迹之间的间隔（秒）
+
+# ==================== 测试节点 ====================
+
+class EnhancedTrajectoryTester(Node):
     def __init__(self):
-        super().__init__('beta3_trajectory_tester')
+        super().__init__('enhanced_trajectory_tester')
 
         # MQTT客户端配置
         self.mqtt_client = mqtt.Client()
         self.mqtt_client.on_connect = self.on_connect
         self.mqtt_client.on_message = self.on_message
 
-        self.robot_id = "robot-001"
-        self.broker_host = "localhost"
-        self.broker_port = 1883
-
         # ROS2发布器和订阅器
-        self.path_publisher = self.create_publisher(Path, '/plans', 10)
+        self.path_publisher = self.create_publisher(Path, PATH_TOPIC, 10)
         self.odom_subscriber = self.create_subscription(
-            Odometry, '/Odom', self.odom_callback, 10)
+            Odometry, ODOM_TOPIC, self.odom_callback, 10)
 
-        # 统计信息
+        # 状态管理
         self.trajectory_count = 0
         self.running = True
         self.current_pose = None
-        self.paths_published = False
-
-        # 测试数据（将在获得位置后生成）
-        self.test_paths = []
+        self.odom_received = False
 
     def odom_callback(self, msg):
         """里程计回调，获取当前位置"""
-        if not self.paths_published:
+        if not self.odom_received:
             self.current_pose = msg.pose.pose
-            self.test_paths = self.create_test_paths_from_current_pose()
-            self.paths_published = True
-            self.get_logger().info('已获取当前位置，测试路径已生成')
+            self.odom_received = True
+            x = msg.pose.pose.position.x
+            y = msg.pose.pose.position.y
+            yaw = self.quaternion_to_yaw(msg.pose.pose.orientation)
+            print(f"✅ 已接收到 /Odom 话题数据")
+            print(f"   当前位置: ({x:.3f}, {y:.3f}), 朝向: {math.degrees(yaw):.1f}°")
 
-    def create_test_paths_from_current_pose(self):
-        """基于当前位置创建包含beta-3新字段的测试路径"""
-        if self.current_pose is None:
-            return []
+    def wait_for_odom_or_timeout(self, timeout_seconds=ODOM_TIMEOUT):
+        """等待Odom话题或超时使用默认数据"""
+        print(f"\n⏳ 等待 {ODOM_TOPIC} 话题数据（最多等待 {timeout_seconds:.0f} 秒）...")
 
-        test_paths = []
+        start_time = time.time()
+        while not self.odom_received and (time.time() - start_time) < timeout_seconds:
+            rclpy.spin_once(self, timeout_sec=0.5)
+
+        if not self.odom_received:
+            print(f"\n⚠️  {timeout_seconds:.0f}秒内未收到 {ODOM_TOPIC} 话题，使用默认位置数据")
+            print(f"   默认位置: ({DEFAULT_X:.3f}, {DEFAULT_Y:.3f}), 朝向: {math.degrees(DEFAULT_YAW):.1f}°")
+            # 创建默认pose
+            self.current_pose = Pose()
+            self.current_pose.position.x = DEFAULT_X
+            self.current_pose.position.y = DEFAULT_Y
+            self.current_pose.position.z = 0.0
+            self.current_pose.orientation = self.euler_to_quaternion(0.0, 0.0, DEFAULT_YAW)
+        else:
+            print(f"✅ 成功获取 {ODOM_TOPIC} 话题数据")
+
+    def publish_first_trajectory(self):
+        """
+        发布第一条轨迹
+        流程：直行 → 原地右转90度 → 停顿 → 原地左转90度回正 → 直行
+        参数：orientation=0.0, flag=0 (前向运动，非分支)
+        """
+        print("\n" + "="*80)
+        print("📤 发布第一条轨迹（Beta-3: orientation=0.0, flag=0）")
+        print("="*80)
+        print("流程：")
+        print(f"  1. 直行 {TRAJ1_FORWARD_DISTANCE}米 ({TRAJ1_FORWARD_POINTS}个点)")
+        print(f"  2. 原地右转 {math.degrees(abs(TRAJ1_RIGHT_TURN_ANGLE)):.0f}度 ({TRAJ1_RIGHT_TURN_STEPS}个点)")
+        print(f"  3. 停顿 {TRAJ1_PAUSE_TIME:.0f}秒 (1个点)")
+        print(f"  4. 原地左转 {math.degrees(TRAJ1_LEFT_TURN_ANGLE):.0f}度回正 ({TRAJ1_LEFT_TURN_STEPS}个点)")
+        print(f"  5. 直行 {TRAJ1_FINAL_FORWARD}米 ({TRAJ1_FINAL_FORWARD_POINTS}个点)")
+        print("="*80)
+
         base_x = self.current_pose.position.x
         base_y = self.current_pose.position.y
-        base_z = self.current_pose.position.z
         base_yaw = self.quaternion_to_yaw(self.current_pose.orientation)
 
-        # 测试路径1：前向运动 + pub_load_params动作
-        path1 = self.create_forward_path(
-            base_x, base_y, base_z, base_yaw,
-            distance=0.5,  # 前进0.5米
-            action_type="pub_load_params",
-            container_type="AGV-T300",
-            container_pose=(base_x + 0.3, base_y + 0.3, 0.1, 3.14, 1.2),
-            orientation=0.0,  # 前向运动
-            flag=0.0  # 非进入分支
-        )
-        test_paths.append(("前向运动+发布取货参数", path1))
-
-        # 测试路径2：倒车运动 + pub_unload_params动作
-        path2 = self.create_backward_path(
-            base_x, base_y, base_z, base_yaw,
-            distance=0.3,  # 倒车0.3米
-            action_type="pub_unload_params",
-            container_type="container",
-            container_pose=(base_x - 0.2, base_y - 0.2, 0.2, -1.57, 0.8),
-            orientation=-3.14,  # 倒车
-            flag=1.0  # 进入分支
-        )
-        test_paths.append(("倒车运动+发布放货参数", path2))
-
-        # 测试路径3：前向转弯 + start_stacking动作
-        path3 = self.create_turn_path(
-            base_x, base_y, base_z, base_yaw,
-            turn_angle=math.pi/4,  # 转45度
-            distance=0.4,  # 转弯后前进0.4米
-            action_type="start_stacking",
-            container_type="pallet",
-            container_pose=(base_x + 0.4, base_y + 0.4, 0.5, 1.57, 1.5),
-            orientation=0.0,  # 前向运动
-            flag=0.5  # 半分支状态
-        )
-        test_paths.append(("前向转弯+启动堆垛", path3))
-
-        # 测试路径4：混合运动方向的路径
-        path4 = self.create_mixed_motion_path(base_x, base_y, base_z, base_yaw)
-        test_paths.append(("混合运动方向测试", path4))
-
-        # 测试路径5：复杂分支标志测试
-        path5 = self.create_branch_sequence_path(base_x, base_y, base_z, base_yaw)
-        test_paths.append(("分支序列测试", path5))
-
-        return test_paths
-
-    def create_forward_path(self, base_x, base_y, base_z, base_yaw, distance,
-                           action_type, container_type, container_pose, orientation, flag):
-        """创建前向运动路径"""
         path = Path()
         path.header = Header()
         path.header.stamp = self.get_clock().now().to_msg()
+        # 第一条轨迹：orientation=0.0, flag=0
+        path.header.frame_id = "map|none|none|0.0|0|0|0|0|0|0"
 
-        # 通过frame_id编码beta-3特定信息
-        container_x, container_y, container_z, container_theta, container_width = container_pose
-        path.header.frame_id = f"map|{action_type}|{container_type}|{orientation}|{flag}|{container_x}|{container_y}|{container_z}|{container_theta}|{container_width}"
-
-        # 沿当前朝向前进
         poses = []
-        for i in range(3):  # 3个点
-            forward_dist = i * (distance / 2)
-            x = base_x + forward_dist * math.cos(base_yaw)
-            y = base_y + forward_dist * math.sin(base_yaw)
-            pose = self.create_pose_stamped(x, y, base_yaw)
-            poses.append(pose)
+
+        # 1. 直行
+        for i in range(TRAJ1_FORWARD_POINTS):
+            dist = (i / (TRAJ1_FORWARD_POINTS - 1)) * TRAJ1_FORWARD_DISTANCE if TRAJ1_FORWARD_POINTS > 1 else 0
+            x = base_x + dist * math.cos(base_yaw)
+            y = base_y + dist * math.sin(base_yaw)
+            poses.append(self.create_pose_stamped(x, y, base_yaw))
+
+        # 直行终点
+        forward_end_x = base_x + TRAJ1_FORWARD_DISTANCE * math.cos(base_yaw)
+        forward_end_y = base_y + TRAJ1_FORWARD_DISTANCE * math.sin(base_yaw)
+
+        # 2. 原地右转（原地转弯：x,y不变，只有yaw变化）
+        for i in range(1, TRAJ1_RIGHT_TURN_STEPS):
+            angle_offset = (i / (TRAJ1_RIGHT_TURN_STEPS - 1)) * TRAJ1_RIGHT_TURN_ANGLE
+            current_yaw = base_yaw + angle_offset
+            poses.append(self.create_pose_stamped(forward_end_x, forward_end_y, current_yaw))
+
+        yaw_after_right = base_yaw + TRAJ1_RIGHT_TURN_ANGLE
+
+        # 3. 停顿（位置和朝向都不变）
+        poses.append(self.create_pose_stamped(forward_end_x, forward_end_y, yaw_after_right))
+
+        # 4. 原地左转回正（原地转弯：x,y不变，只有yaw变化）
+        for i in range(1, TRAJ1_LEFT_TURN_STEPS):
+            angle_offset = (i / (TRAJ1_LEFT_TURN_STEPS - 1)) * TRAJ1_LEFT_TURN_ANGLE
+            current_yaw = yaw_after_right + angle_offset
+            poses.append(self.create_pose_stamped(forward_end_x, forward_end_y, current_yaw))
+
+        # 5. 最后直行
+        for i in range(1, TRAJ1_FINAL_FORWARD_POINTS + 1):
+            dist = (i / TRAJ1_FINAL_FORWARD_POINTS) * TRAJ1_FINAL_FORWARD
+            x = forward_end_x + dist * math.cos(base_yaw)
+            y = forward_end_y + dist * math.sin(base_yaw)
+            poses.append(self.create_pose_stamped(x, y, base_yaw))
 
         path.poses = poses
-        return path
 
-    def create_backward_path(self, base_x, base_y, base_z, base_yaw, distance,
-                            action_type, container_type, container_pose, orientation, flag):
-        """创建倒车运动路径"""
+        # 打印详细信息
+        self.print_trajectory_details(1, path, poses, "orientation=0.0, flag=0 (前向运动，非分支)")
+
+        self.path_publisher.publish(path)
+        print("📡 第一条轨迹已发布到 /plans 话题\n")
+
+    def publish_second_trajectory(self):
+        """
+        发布第二条轨迹
+        流程：原地左转90度 → 倒车
+        参数：orientation=3.14, flag=1 (倒车运动，进入分支)
+        """
+        print("\n" + "="*80)
+        print("📤 发布第二条轨迹（Beta-3: orientation=3.14, flag=1）")
+        print("="*80)
+        print("流程：")
+        print(f"  1. 原地左转 {math.degrees(TRAJ2_LEFT_TURN_ANGLE):.0f}度 ({TRAJ2_LEFT_TURN_STEPS}个点)")
+        print(f"  2. 倒车 {TRAJ2_BACKWARD_DISTANCE}米 ({TRAJ2_BACKWARD_POINTS}个点)")
+        print("="*80)
+
+        # 第二条轨迹从第一条轨迹的终点开始
+        base_x = self.current_pose.position.x
+        base_y = self.current_pose.position.y
+        base_yaw = self.quaternion_to_yaw(self.current_pose.orientation)
+
+        # 计算第一条轨迹的终点
+        total_forward = TRAJ1_FORWARD_DISTANCE + TRAJ1_FINAL_FORWARD
+        start_x = base_x + total_forward * math.cos(base_yaw)
+        start_y = base_y + total_forward * math.sin(base_yaw)
+        start_yaw = base_yaw
+
+        # 容器位姿
+        container_x = start_x + CONTAINER_OFFSET_X
+        container_y = start_y + CONTAINER_OFFSET_Y
+
         path = Path()
         path.header = Header()
         path.header.stamp = self.get_clock().now().to_msg()
-
-        # 通过frame_id编码beta-3特定信息
-        container_x, container_y, container_z, container_theta, container_width = container_pose
-        path.header.frame_id = f"map|{action_type}|{container_type}|{orientation}|{flag}|{container_x}|{container_y}|{container_z}|{container_theta}|{container_width}"
-
-        # 沿当前朝向反方向后退
-        poses = []
-        for i in range(3):  # 3个点
-            backward_dist = i * (distance / 2)
-            x = base_x - backward_dist * math.cos(base_yaw)
-            y = base_y - backward_dist * math.sin(base_yaw)
-            # 倒车时车头朝向调转180度
-            backward_yaw = base_yaw + math.pi
-            pose = self.create_pose_stamped(x, y, backward_yaw)
-            poses.append(pose)
-
-        path.poses = poses
-        return path
-
-    def create_turn_path(self, base_x, base_y, base_z, base_yaw, turn_angle, distance,
-                        action_type, container_type, container_pose, orientation, flag):
-        """创建转弯路径"""
-        path = Path()
-        path.header = Header()
-        path.header.stamp = self.get_clock().now().to_msg()
-
-        # 通过frame_id编码beta-3特定信息
-        container_x, container_y, container_z, container_theta, container_width = container_pose
-        path.header.frame_id = f"map|{action_type}|{container_type}|{orientation}|{flag}|{container_x}|{container_y}|{container_z}|{container_theta}|{container_width}"
+        # 第二条轨迹：orientation=3.14, flag=1
+        path.header.frame_id = f"map|pub_unload_params|{CONTAINER_TYPE}|3.14|1|{container_x}|{container_y}|{CONTAINER_Z}|{CONTAINER_THETA}|{CONTAINER_WIDTH}"
 
         poses = []
-        # 起点
-        poses.append(self.create_pose_stamped(base_x, base_y, base_yaw))
 
-        # 转弯中点
-        mid_yaw = base_yaw + turn_angle / 2
-        mid_x = base_x + (distance / 3) * math.cos(mid_yaw)
-        mid_y = base_y + (distance / 3) * math.sin(mid_yaw)
-        poses.append(self.create_pose_stamped(mid_x, mid_y, mid_yaw))
+        # 1. 原地左转（原地转弯：x,y不变，只有yaw变化）
+        for i in range(TRAJ2_LEFT_TURN_STEPS):
+            angle_offset = (i / (TRAJ2_LEFT_TURN_STEPS - 1)) * TRAJ2_LEFT_TURN_ANGLE if TRAJ2_LEFT_TURN_STEPS > 1 else 0
+            current_yaw = start_yaw + angle_offset
+            poses.append(self.create_pose_stamped(start_x, start_y, current_yaw))
 
-        # 终点
-        end_yaw = base_yaw + turn_angle
-        end_x = base_x + distance * math.cos(end_yaw)
-        end_y = base_y + distance * math.sin(end_yaw)
-        poses.append(self.create_pose_stamped(end_x, end_y, end_yaw))
+        yaw_after_left = start_yaw + TRAJ2_LEFT_TURN_ANGLE
 
-        path.poses = poses
-        return path
-
-    def create_mixed_motion_path(self, base_x, base_y, base_z, base_yaw):
-        """创建包含不同运动方向的路径"""
-        path = Path()
-        path.header = Header()
-        path.header.stamp = self.get_clock().now().to_msg()
-        # 混合运动：前向-侧向-倒车的组合
-        path.header.frame_id = f"map|mixed_motion|none|0.0|0.0|0|0|0|0|0"
-
-        poses = []
-        # 前向运动点
-        poses.append(self.create_pose_stamped(base_x, base_y, base_yaw))
-
-        # 侧向运动点（90度转向）
-        side_yaw = base_yaw + math.pi/2
-        side_x = base_x + 0.2 * math.cos(side_yaw)
-        side_y = base_y + 0.2 * math.sin(side_yaw)
-        poses.append(self.create_pose_stamped(side_x, side_y, side_yaw))
-
-        # 倒车运动点（180度转向）
-        back_yaw = base_yaw + math.pi
-        back_x = side_x + 0.2 * math.cos(back_yaw)
-        back_y = side_y + 0.2 * math.sin(back_yaw)
-        poses.append(self.create_pose_stamped(back_x, back_y, back_yaw))
-
-        # 回到前向
-        final_yaw = base_yaw
-        final_x = back_x + 0.2 * math.cos(final_yaw)
-        final_y = back_y + 0.2 * math.sin(final_yaw)
-        poses.append(self.create_pose_stamped(final_x, final_y, final_yaw))
+        # 2. 倒车（沿朝向反方向移动，车头朝向不变）
+        for i in range(1, TRAJ2_BACKWARD_POINTS + 1):
+            dist = (i / TRAJ2_BACKWARD_POINTS) * TRAJ2_BACKWARD_DISTANCE
+            # 倒车：沿朝向反方向移动
+            x = start_x - dist * math.cos(yaw_after_left)
+            y = start_y - dist * math.sin(yaw_after_left)
+            poses.append(self.create_pose_stamped(x, y, yaw_after_left))
 
         path.poses = poses
-        return path
 
-    def create_branch_sequence_path(self, base_x, base_y, base_z, base_yaw):
-        """创建分支序列测试路径"""
-        path = Path()
-        path.header = Header()
-        path.header.stamp = self.get_clock().now().to_msg()
-        # 分支序列：非分支->分支->非分支
-        path.header.frame_id = f"map|branch_sequence|none|0.0|0.0|0|0|0|0|0"
+        # 打印详细信息
+        self.print_trajectory_details(2, path, poses,
+                                     f"orientation=3.14, flag=1 (倒车运动，进入分支)\n"
+                                     f"                        action=pub_unload_params, containerType={CONTAINER_TYPE}")
 
-        poses = []
-        # 非分支起点
-        poses.append(self.create_pose_stamped(base_x, base_y, base_yaw))
+        self.path_publisher.publish(path)
+        print("📡 第二条轨迹已发布到 /plans 话题\n")
 
-        # 分支中点
-        branch_x = base_x + 0.15 * math.cos(base_yaw)
-        branch_y = base_y + 0.15 * math.sin(base_yaw)
-        poses.append(self.create_pose_stamped(branch_x, branch_y, base_yaw))
+    def print_trajectory_details(self, traj_num, path, poses, beta3_params):
+        """打印轨迹详细信息"""
+        print(f"\n✅ 第{traj_num}条轨迹生成完成，共 {len(poses)} 个路径点")
 
-        # 非分支终点
-        end_x = base_x + 0.3 * math.cos(base_yaw)
-        end_y = base_y + 0.3 * math.sin(base_yaw)
-        poses.append(self.create_pose_stamped(end_x, end_y, base_yaw))
+        print("\n" + "="*80)
+        print(f"📋 第{traj_num}条轨迹发布详情（用于对比接收方）")
+        print("="*80)
+        print(f"Header:")
+        print(f"  frame_id: {path.header.frame_id}")
+        print(f"  timestamp: {path.header.stamp.sec}.{path.header.stamp.nanosec:09d}")
+        print(f"\n路径点数量: {len(poses)}")
 
-        path.poses = poses
-        return path
+        # 打印前3个点
+        print(f"\n前{min(3, len(poses))}个路径点:")
+        for i in range(min(3, len(poses))):
+            p = poses[i].pose
+            yaw = self.quaternion_to_yaw(p.orientation)
+            print(f"  点{i+1}: x={p.position.x:.3f}, y={p.position.y:.3f}, yaw={yaw:.3f} ({math.degrees(yaw):.1f}°)")
+
+        # 打印最后一个点
+        if len(poses) > 3:
+            print(f"\n最后1个路径点:")
+            p = poses[-1].pose
+            yaw = self.quaternion_to_yaw(p.orientation)
+            print(f"  点{len(poses)}: x={p.position.x:.3f}, y={p.position.y:.3f}, yaw={yaw:.3f} ({math.degrees(yaw):.1f}°)")
+
+        print(f"\n解析后的Beta-3参数:")
+        print(f"  {beta3_params}")
+        print("="*80)
 
     def create_pose_stamped(self, x, y, theta):
         """创建姿态点"""
         pose = PoseStamped()
         pose.header.stamp = self.get_clock().now().to_msg()
         pose.header.frame_id = "map"
-
         pose.pose.position.x = x
         pose.pose.position.y = y
         pose.pose.position.z = 0.0
-
-        # 将欧拉角转换为四元数
-        quat = self.euler_to_quaternion(0.0, 0.0, theta)
-        pose.pose.orientation = quat
-
+        pose.pose.orientation = self.euler_to_quaternion(0.0, 0.0, theta)
         return pose
 
     def quaternion_to_yaw(self, q):
         """将四元数转换为yaw角度（弧度）"""
         siny_cosp = 2 * (q.w * q.z + q.x * q.y)
         cosy_cosp = 1 - 2 * (q.y * q.y + q.z * q.z)
-        yaw = math.atan2(siny_cosp, cosy_cosp)
-        return yaw
+        return math.atan2(siny_cosp, cosy_cosp)
 
     def euler_to_quaternion(self, roll, pitch, yaw):
         """欧拉角转四元数"""
-        qx = math.sin(roll/2) * math.cos(pitch/2) * math.cos(yaw/2) - math.cos(roll/2) * math.sin(pitch/2) * math.sin(yaw/2)
-        qy = math.cos(roll/2) * math.sin(pitch/2) * math.cos(yaw/2) + math.sin(roll/2) * math.cos(pitch/2) * math.sin(yaw/2)
-        qz = math.cos(roll/2) * math.cos(pitch/2) * math.sin(yaw/2) - math.sin(roll/2) * math.sin(pitch/2) * math.cos(yaw/2)
-        qw = math.cos(roll/2) * math.cos(pitch/2) * math.cos(yaw/2) + math.sin(roll/2) * math.sin(pitch/2) * math.sin(yaw/2)
+        cy = math.cos(yaw * 0.5)
+        sy = math.sin(yaw * 0.5)
+        cp = math.cos(pitch * 0.5)
+        sp = math.sin(pitch * 0.5)
+        cr = math.cos(roll * 0.5)
+        sr = math.sin(roll * 0.5)
 
-        quat = Quaternion()
-        quat.x = qx
-        quat.y = qy
-        quat.z = qz
-        quat.w = qw
-        return quat
+        q = Quaternion()
+        q.w = cy * cp * cr + sy * sp * sr
+        q.x = cy * cp * sr - sy * sp * cr
+        q.y = sy * cp * sr + cy * sp * cr
+        q.z = sy * cp * cr - cy * sp * sr
+        return q
 
     # MQTT回调函数
     def on_connect(self, client, userdata, flags, rc):
         if rc == 0:
             print("✅ MQTT连接成功")
-            # 订阅轨迹消息主题
-            trajectory_topic = f"EP/{self.robot_id}/embrain/cerebellum/trajectory"
+            trajectory_topic = f"EP/{ROBOT_ID}/embrain/cerebellum/trajectory"
             client.subscribe(trajectory_topic)
             print(f"📡 订阅轨迹主题: {trajectory_topic}")
         else:
@@ -302,71 +334,56 @@ class Beta3TrajectoryWorkflowTester(Node):
 
     def on_message(self, client, userdata, msg):
         try:
-            # 解析轨迹消息
             trajectory_data = json.loads(msg.payload.decode())
 
-            print("\\n" + "="*80)
-            print("🚀 收到beta-3轨迹消息！")
+            print("\n" + "="*80)
+            print("🚀 收到Beta-3轨迹消息！")
             print("="*80)
             print(f"📋 轨迹ID: {trajectory_data.get('trajectoryId', 'N/A')}")
             print(f"⏰ 时间戳: {trajectory_data.get('timestamp', 'N/A')}")
             print(f"🏃 最大速度: {trajectory_data.get('maxSpeed', 'N/A')} m/s")
 
-            # 分析轨迹点和新字段
             trajectory_points = trajectory_data.get('trajectoryPoints', [])
             print(f"📍 轨迹点数量: {len(trajectory_points)}")
 
-            action_points = []
-            orientation_summary = {}
-            flag_summary = {}
+            if trajectory_points:
+                first_point = trajectory_points[0]
+                last_point = trajectory_points[-1]
 
-            for i, point in enumerate(trajectory_points):
-                # 统计orientation和flag
-                orientation = point.get('orientation', 0.0)
-                flag = point.get('flag', 0.0)
+                orientation = first_point.get('orientation', 'missing')
+                flag = first_point.get('flag', 'missing')
+                action = first_point.get('action')
 
-                orientation_type = "前向" if orientation == 0.0 else "倒车"
-                flag_type = "非分支" if flag == 0.0 else "分支"
+                print(f"\n🔍 Beta-3字段验证:")
+                print(f"   🔄 运动方向 (orientation): {orientation}")
+                if orientation == 0.0:
+                    print("      ✅ 前向运动")
+                elif abs(orientation - 3.14) < 0.01 or abs(orientation + 3.14) < 0.01:
+                    print("      ✅ 倒车运动")
+                else:
+                    print(f"      ⚠️  异常角度 ({orientation})")
 
-                orientation_summary[orientation_type] = orientation_summary.get(orientation_type, 0) + 1
-                flag_summary[flag_type] = flag_summary.get(flag_type, 0) + 1
+                print(f"   🌿 分支标志 (flag): {flag}")
+                if flag == 0 or flag == 0.0:
+                    print("      ✅ 非分支状态")
+                elif flag == 1 or flag == 1.0:
+                    print("      ✅ 进入分支状态")
+                else:
+                    print(f"      ❌ 错误的flag值！应该只有0或1，当前值: {flag}")
 
-                print(f"\\n  点 {i+1}: ({point.get('x', 0):.2f}, {point.get('y', 0):.2f}) "
-                      f"角度: {point.get('theta', 0):.3f} 弧度")
-                print(f"    🔄 运动方向: {orientation_type} (orientation={orientation})")
-                print(f"    🌿 分支标志: {flag_type} (flag={flag})")
+                print(f"   🎯 动作 (action): {action}")
+                if action is None:
+                    print("      ✅ 无动作（纯行驶）")
+                else:
+                    print(f"      ✅ 动作类型: {action.get('actionType', 'unknown')}")
+                    print(f"         容器类型: {action.get('containerType', 'none')}")
 
-                # 检查动作参数
-                if 'action' in point:
-                    if point['action'] is not None:
-                        action = point['action']
-                        action_points.append(i+1)
-                        print(f"    🎯 动作类型: {action.get('actionType', 'N/A')}")
-
-                        if 'containerType' in action and action['containerType']:
-                            print(f"    📦 容器类型: {action.get('containerType', 'N/A')}")
-
-                        if 'containerPose' in action and action['containerPose']:
-                            container_pose = action['containerPose']
-                            print(f"    🏗️  容器位姿:")
-                            print(f"       位置: ({container_pose.get('x', 0):.2f}, "
-                                  f"{container_pose.get('y', 0):.2f}, "
-                                  f"{container_pose.get('z', 0):.2f})")
-                            print(f"       角度: {container_pose.get('theta', 0):.3f} 弧度 "
-                                  f"({container_pose.get('theta', 0) * 180 / 3.14159:.1f}°)")
-                            print(f"       宽度: {container_pose.get('width', 0):.2f} 米")
-                    else:
-                        print(f"    ✅ 动作: null (纯行驶)")
-
-            # 总结beta-3新特性
-            print(f"\\n🔄 运动方向统计: {orientation_summary}")
-            print(f"🌿 分支标志统计: {flag_summary}")
-
-            if action_points:
-                print(f"🎬 包含动作的轨迹点: {action_points}")
+                print(f"\n📍 轨迹点信息:")
+                print(f"   起点: ({first_point.get('x', 0):.3f}, {first_point.get('y', 0):.3f}), θ={first_point.get('theta', 0):.3f}")
+                print(f"   终点: ({last_point.get('x', 0):.3f}, {last_point.get('y', 0):.3f}), θ={last_point.get('theta', 0):.3f}")
 
             self.trajectory_count += 1
-            print(f"\\n📊 已接收轨迹消息数量: {self.trajectory_count}")
+            print(f"\n📊 已接收轨迹消息数量: {self.trajectory_count}")
             print("="*80)
 
         except json.JSONDecodeError:
@@ -377,52 +394,25 @@ class Beta3TrajectoryWorkflowTester(Node):
     def start_mqtt_listener(self):
         """启动MQTT监听器"""
         try:
-            print("🚀 启动MQTT监听器")
-            print(f"📡 连接到MQTT代理: {self.broker_host}:{self.broker_port}")
-
-            self.mqtt_client.connect(self.broker_host, self.broker_port, 60)
+            print(f"🚀 连接到MQTT代理: {MQTT_BROKER}:{MQTT_PORT}")
+            self.mqtt_client.connect(MQTT_BROKER, MQTT_PORT, 60)
             self.mqtt_client.loop_start()
             return True
         except Exception as e:
             print(f"❌ MQTT连接失败: {e}")
             return False
 
-    def publish_test_paths(self):
-        """发布测试路径"""
-        if not self.test_paths:
-            print("\\n❌ 无测试路径可发布，等待获取当前位置...")
-            return
-
-        print("\\n🎯 开始发布beta-3测试路径...")
-        print(f"   基于当前位置: ({self.current_pose.position.x:.3f}, {self.current_pose.position.y:.3f})")
-        print(f"   当前朝向: {math.degrees(self.quaternion_to_yaw(self.current_pose.orientation)):.1f}°")
-
-        for i, (description, path) in enumerate(self.test_paths):
-            print(f"\\n📤 发布测试 {i+1}/{len(self.test_paths)}: {description}")
-            print(f"   路径点数量: {len(path.poses)}")
-            if path.poses:
-                print(f"   起点: ({path.poses[0].pose.position.x:.3f}, {path.poses[0].pose.position.y:.3f})")
-                print(f"   终点: ({path.poses[-1].pose.position.x:.3f}, {path.poses[-1].pose.position.y:.3f})")
-                print(f"   Frame ID: {path.header.frame_id}")
-
-            self.path_publisher.publish(path)
-
-            # 等待处理
-            time.sleep(4)
-
-        print("\\n✅ 所有beta-3测试路径已发布")
-
     def stop(self):
         """停止测试"""
         self.running = False
         self.mqtt_client.loop_stop()
         self.mqtt_client.disconnect()
-        print("\\n🛑 beta-3测试已停止")
+        print("\n🛑 测试已停止")
 
 
 def signal_handler(sig, frame):
     """处理中断信号"""
-    print("\\n⏹️  收到中断信号，正在停止beta-3测试...")
+    print("\n⏹️ 收到中断信号，正在停止测试...")
     global tester
     if tester:
         tester.stop()
@@ -433,14 +423,14 @@ def signal_handler(sig, frame):
 def main():
     global tester
 
-    print("🧪 beta-3轨迹工作流程测试")
-    print("=" * 60)
-    print("该测试将验证beta-3协议的新特性：")
-    print("1. orientation字段（运动方向）")
-    print("2. flag字段（进入分支标志位）")
-    print("3. 新的动作类型（pub_load_params, pub_unload_params, start_stacking）")
-    print("4. 完整的ROS2 → MQTT轨迹数据流")
-    print("=" * 60)
+    print("🧪 Beta-3协议增强型轨迹工作流程测试")
+    print("=" * 80)
+    print("测试配置：")
+    print(f"  轨迹1: {'启用' if ENABLE_TRAJECTORY1 else '禁用'}")
+    print(f"  轨迹2: {'启用' if ENABLE_TRAJECTORY2 else '禁用'}")
+    print(f"  Odom超时: {ODOM_TIMEOUT:.0f}秒")
+    print(f"  轨迹间隔: {TRAJECTORY_INTERVAL:.0f}秒")
+    print("=" * 80)
 
     # 注册信号处理器
     signal.signal(signal.SIGINT, signal_handler)
@@ -448,37 +438,33 @@ def main():
     # 初始化ROS2
     rclpy.init()
 
-    tester = Beta3TrajectoryWorkflowTester()
+    tester = EnhancedTrajectoryTester()
 
     # 启动MQTT监听器
     if not tester.start_mqtt_listener():
         return
 
-    print("\\n🎯 beta-3测试准备就绪！")
-    print("💡 确保桥接器正在运行：")
-    print("   ./install/ros2_zhongli_bridge_cpp/bin/zhongli_bridge_node")
-    print("\\n⏳ 5秒后开始发布beta-3测试路径...")
-
-    # 等待获取当前位置和生成路径
-    print("\\n⏳ 等待获取当前位置...")
-    while not tester.paths_published and rclpy.ok():
-        rclpy.spin_once(tester, timeout_sec=1.0)
-
-    if not tester.paths_published:
-        print("\\n❌ 未能获取当前位置，请确保/Odom话题正在发布")
-        return
-
-    print("\\n⏳ 5秒后开始发布beta-3测试路径...")
-    time.sleep(5)
+    # 等待Odom话题或超时
+    tester.wait_for_odom_or_timeout()
 
     try:
-        # 发布测试路径
-        tester.publish_test_paths()
+        # 发布第一条轨迹
+        if ENABLE_TRAJECTORY1:
+            print("\n⏱️  准备发布第一条轨迹...")
+            time.sleep(1)
+            tester.publish_first_trajectory()
 
-        print("\\n⏳ 等待轨迹消息接收...")
-        print("   按 Ctrl+C 停止测试")
+        # 等待后发布第二条轨迹
+        if ENABLE_TRAJECTORY2:
+            print(f"\n⏱️  等待{TRAJECTORY_INTERVAL:.0f}秒后发布第二条轨迹...")
+            time.sleep(TRAJECTORY_INTERVAL)
+            tester.publish_second_trajectory()
 
-        # 保持ROS2节点运行
+        print("\n✅ 轨迹发布完成")
+        print("💡 保持运行以监听MQTT轨迹消息...")
+        print("   按 Ctrl+C 停止测试\n")
+
+        # 保持ROS2节点运行，监听MQTT消息
         while tester.running and rclpy.ok():
             rclpy.spin_once(tester, timeout_sec=1.0)
 

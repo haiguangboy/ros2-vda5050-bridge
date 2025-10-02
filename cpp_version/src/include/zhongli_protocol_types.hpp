@@ -12,6 +12,126 @@
 namespace zhongli_protocol {
 
 /**
+ * @brief Beta-3协议：运动方向枚举
+ * 定义在4.2.6节 轨迹指令消息
+ */
+enum class Orientation : int {
+    FORWARD = 0,        ///< 前向运动
+    BACKWARD_NEG = -314,///< 倒车（-3.14弧度的整数表示，实际使用时除以100）
+    BACKWARD_POS = 314  ///< 倒车（3.14弧度的整数表示，实际使用时除以100）
+};
+
+/**
+ * @brief Beta-3协议：进入分支标志位枚举
+ * 定义在4.2.6节 轨迹指令消息
+ */
+enum class BranchFlag : int {
+    NON_BRANCH = 0,     ///< 非进入分支
+    ENTER_BRANCH = 1    ///< 进行分支
+};
+
+/**
+ * @brief Beta-3协议：动作类型枚举
+ * 定义在4.2.3节和4.2.6节
+ */
+enum class ActionType {
+    GROUND_PICK,        ///< ground_pick: 地面取货
+    GROUND_PLACE,       ///< ground_place: 地面放货
+    LOAD,               ///< load: 平台取货
+    UNLOAD,             ///< unload: 平台放货
+    PUB_LOAD_PARAMS,    ///< pub_load_params: 发布取货参数
+    PUB_UNLOAD_PARAMS,  ///< pub_unload_params: 发布放货参数
+    START_STACKING      ///< start_stacking: 启动堆垛
+};
+
+/**
+ * @brief 将Orientation枚举转换为实际的弧度值
+ */
+inline double orientation_to_radians(Orientation orient) {
+    switch (orient) {
+        case Orientation::FORWARD:
+            return 0.0;
+        case Orientation::BACKWARD_NEG:
+            return -3.14;
+        case Orientation::BACKWARD_POS:
+            return 3.14;
+        default:
+            return 0.0;
+    }
+}
+
+/**
+ * @brief 将弧度值转换为最接近的Orientation枚举
+ */
+inline Orientation radians_to_orientation(double radians) {
+    if (std::abs(radians - 0.0) < 0.01) {
+        return Orientation::FORWARD;
+    } else if (std::abs(radians - 3.14) < 0.01) {
+        return Orientation::BACKWARD_POS;
+    } else if (std::abs(radians + 3.14) < 0.01) {
+        return Orientation::BACKWARD_NEG;
+    }
+    return Orientation::FORWARD;  // 默认前向
+}
+
+/**
+ * @brief 将BranchFlag枚举转换为整数值
+ */
+inline int branch_flag_to_int(BranchFlag flag) {
+    return static_cast<int>(flag);
+}
+
+/**
+ * @brief 将整数值转换为BranchFlag枚举
+ */
+inline BranchFlag int_to_branch_flag(int value) {
+    if (value == 0) {
+        return BranchFlag::NON_BRANCH;
+    } else if (value == 1) {
+        return BranchFlag::ENTER_BRANCH;
+    }
+    return BranchFlag::NON_BRANCH;  // 默认非分支
+}
+
+/**
+ * @brief 将ActionType枚举转换为字符串
+ */
+inline std::string action_type_to_string(ActionType type) {
+    switch (type) {
+        case ActionType::GROUND_PICK:
+            return "ground_pick";
+        case ActionType::GROUND_PLACE:
+            return "ground_place";
+        case ActionType::LOAD:
+            return "load";
+        case ActionType::UNLOAD:
+            return "unload";
+        case ActionType::PUB_LOAD_PARAMS:
+            return "pub_load_params";
+        case ActionType::PUB_UNLOAD_PARAMS:
+            return "pub_unload_params";
+        case ActionType::START_STACKING:
+            return "start_stacking";
+        default:
+            return "unknown";
+    }
+}
+
+/**
+ * @brief 将字符串转换为ActionType枚举
+ */
+inline std::optional<ActionType> string_to_action_type(const std::string& str) {
+    if (str == "ground_pick") return ActionType::GROUND_PICK;
+    if (str == "ground_place") return ActionType::GROUND_PLACE;
+    if (str == "load") return ActionType::LOAD;
+    if (str == "unload") return ActionType::UNLOAD;
+    if (str == "pub_load_params") return ActionType::PUB_LOAD_PARAMS;
+    if (str == "pub_unload_params") return ActionType::PUB_UNLOAD_PARAMS;
+    if (str == "start_stacking") return ActionType::START_STACKING;
+    return std::nullopt;
+}
+
+/**
  * @brief 机器人位姿信息
  */
 struct Pose {

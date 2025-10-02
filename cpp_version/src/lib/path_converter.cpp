@@ -4,6 +4,7 @@
 #include <sstream>
 #include <iomanip>
 #include <vector>
+#include <iostream>
 
 namespace zhongli_bridge {
 
@@ -196,8 +197,47 @@ PathConverter::Beta3Info PathConverter::parse_beta3_info_from_frame_id(const std
         try {
             info.action_type = parts[1];
             info.container_type = parts[2];
-            info.orientation = std::stod(parts[3]);
-            info.flag = std::stod(parts[4]);
+
+            // 解析 orientation 并验证是否符合协议规范
+            double parsed_orientation = std::stod(parts[3]);
+            // Beta-3协议规范：0（前向）, -3.14（倒车）, 3.14（倒车）
+            if (std::abs(parsed_orientation - 0.0) < 0.01) {
+                info.orientation = 0.0;  // 前向
+            } else if (std::abs(parsed_orientation - 3.14) < 0.01) {
+                info.orientation = 3.14;  // 倒车
+            } else if (std::abs(parsed_orientation + 3.14) < 0.01) {
+                info.orientation = -3.14;  // 倒车
+            } else {
+                // 非法值，使用默认值并记录警告
+                info.orientation = 0.0;
+                std::cerr << "警告: orientation值 " << parsed_orientation
+                         << " 不符合Beta-3协议规范（应为0, 3.14或-3.14），使用默认值0.0" << std::endl;
+            }
+
+            // 解析 flag 并验证是否符合协议规范
+            double parsed_flag = std::stod(parts[4]);
+            // Beta-3协议规范：只能是0（非分支）或1（进入分支）
+            if (std::abs(parsed_flag - 0.0) < 0.01) {
+                info.flag = 0.0;  // 非分支
+            } else if (std::abs(parsed_flag - 1.0) < 0.01) {
+                info.flag = 1.0;  // 进入分支
+            } else {
+                // 非法值，使用默认值并记录警告
+                info.flag = 0.0;
+                std::cerr << "警告: flag值 " << parsed_flag
+                         << " 不符合Beta-3协议规范（只能是0或1），使用默认值0" << std::endl;
+            }
+
+            // 验证 action_type 是否符合协议规范
+            if (!info.action_type.empty() && info.action_type != "none") {
+                auto action_enum = zhongli_protocol::string_to_action_type(info.action_type);
+                if (!action_enum.has_value()) {
+                    std::cerr << "警告: action_type值 '" << info.action_type
+                             << "' 不符合Beta-3协议规范，有效值为: ground_pick, ground_place, "
+                             << "load, unload, pub_load_params, pub_unload_params, start_stacking"
+                             << std::endl;
+                }
+            }
 
             // 如果有扩展的容器位姿信息，可以在这里解析
             // if (parts.size() >= 10) {
@@ -210,6 +250,7 @@ PathConverter::Beta3Info PathConverter::parse_beta3_info_from_frame_id(const std
             // }
         } catch (const std::exception& e) {
             // 解析失败，使用默认值
+            std::cerr << "解析frame_id失败: " << e.what() << "，使用默认值" << std::endl;
         }
     }
 
