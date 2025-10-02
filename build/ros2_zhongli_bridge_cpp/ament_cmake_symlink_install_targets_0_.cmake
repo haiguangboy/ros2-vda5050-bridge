@@ -1,0 +1,1 @@
+ament_cmake_symlink_install_targets("TARGET_FILES" "/home/yhg/Documents/docs/zhongli/cpp_version/build/ros2_zhongli_bridge_cpp/zhongli_bridge_node" "TARGETS" "zhongli_bridge_node" "DESTINATION" "bin")

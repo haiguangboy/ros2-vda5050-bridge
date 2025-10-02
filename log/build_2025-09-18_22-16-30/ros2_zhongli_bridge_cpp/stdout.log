@@ -1,0 +1,3 @@
+[ 18%] Built target zhongli_protocol_types
+[ 36%] Built target zhongli_mqtt_client
+[ 45%] Building CXX object src/lib/CMakeFiles/ros2_zhongli_bridge.dir/ros2_zhongli_bridge.cpp.o

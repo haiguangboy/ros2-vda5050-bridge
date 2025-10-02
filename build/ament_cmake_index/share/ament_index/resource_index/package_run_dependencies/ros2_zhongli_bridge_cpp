@@ -1,0 +1,1 @@
+rclcpp;std_msgs;geometry_msgs;nav_msgs;nav2_msgs;action_msgs;tf2_ros;tf2_geometry_msgs;nlohmann-json3-dev;libpaho-mqttpp-dev;ament_lint_auto;ament_lint_common;ament_cmake_gtest

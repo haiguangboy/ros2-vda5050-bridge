@@ -1,0 +1,64 @@
+[0.009s] Invoking command in '/home/yhg/Documents/docs/zhongli/cpp_version/build/ros2_zhongli_bridge_cpp': CMAKE_PREFIX_PATH=/opt/ros/humble /usr/bin/cmake --build /home/yhg/Documents/docs/zhongli/cpp_version/build/ros2_zhongli_bridge_cpp -- -j20 -l20
+[0.137s] [  9%] Building CXX object src/lib/CMakeFiles/zhongli_protocol_types.dir/zhongli_protocol_types.cpp.o
+[1.097s] [ 18%] Linking CXX shared library libzhongli_protocol_types.so
+[1.159s] [ 18%] Built target zhongli_protocol_types
+[1.183s] [ 27%] Building CXX object src/lib/CMakeFiles/zhongli_mqtt_client.dir/zhongli_mqtt_client.cpp.o
+[2.797s] [ 36%] Linking CXX shared library libzhongli_mqtt_client.so
+[2.888s] [ 36%] Built target zhongli_mqtt_client
+[2.935s] [ 45%] Building CXX object src/lib/CMakeFiles/ros2_zhongli_bridge.dir/ros2_zhongli_bridge.cpp.o
+[2.936s] [ 54%] Building CXX object src/lib/CMakeFiles/ros2_zhongli_bridge.dir/path_converter.cpp.o
+[4.701s] In file included from /opt/ros/humble/include/rclcpp/rclcpp/logging.hpp:24,
+[4.701s]                  from /opt/ros/humble/include/rclcpp/rclcpp/client.hpp:40,
+[4.701s]                  from /opt/ros/humble/include/rclcpp/rclcpp/callback_group.hpp:24,
+[4.701s]                  from /opt/ros/humble/include/rclcpp/rclcpp/any_executable.hpp:20,
+[4.701s]                  from /opt/ros/humble/include/rclcpp/rclcpp/memory_strategy.hpp:25,
+[4.701s]                  from /opt/ros/humble/include/rclcpp/rclcpp/memory_strategies.hpp:18,
+[4.701s]                  from /opt/ros/humble/include/rclcpp/rclcpp/executor_options.hpp:20,
+[4.701s]                  from /opt/ros/humble/include/rclcpp/rclcpp/executor.hpp:37,
+[4.701s]                  from /opt/ros/humble/include/rclcpp/rclcpp/executors/multi_threaded_executor.hpp:25,
+[4.701s]                  from /opt/ros/humble/include/rclcpp/rclcpp/executors.hpp:21,
+[4.701s]                  from /opt/ros/humble/include/rclcpp/rclcpp/rclcpp.hpp:155,
+[4.701s]                  from /home/yhg/Documents/docs/zhongli/cpp_version/src/include/ros2_zhongli_bridge.hpp:3,
+[4.701s]                  from /home/yhg/Documents/docs/zhongli/cpp_version/src/lib/ros2_zhongli_bridge.cpp:1:
+[4.701s] /home/yhg/Documents/docs/zhongli/cpp_version/src/lib/ros2_zhongli_bridge.cpp: In member function ‘bool zhongli_bridge::ROS2ZhongliBridge::initialize()’:
+[4.701s] /home/yhg/Documents/docs/zhongli/cpp_version/src/lib/ros2_zhongli_bridge.cpp:30:41: warning: zero-length gnu_printf format string [-Wformat-zero-length]
+[4.701s]    30 |         RCLCPP_INFO(this->get_logger(), "");
+[4.701s]       |                                         ^~
+[4.702s] /home/yhg/Documents/docs/zhongli/cpp_version/src/lib/ros2_zhongli_bridge.cpp:42:41: warning: zero-length gnu_printf format string [-Wformat-zero-length]
+[4.702s]    42 |         RCLCPP_INFO(this->get_logger(), "");
+[4.702s]       |                                         ^~
+[15.095s] [ 63%] Linking CXX shared library libros2_zhongli_bridge.so
+[15.895s] [ 63%] Built target ros2_zhongli_bridge
+[15.910s] Consolidate compiler generated dependencies of target test_real_plan_subscription
+[15.923s] [ 72%] Building CXX object CMakeFiles/zhongli_bridge_node.dir/src/main.cpp.o
+[15.930s] [ 81%] Building CXX object src/tests/CMakeFiles/test_real_plan_subscription.dir/test_real_plan_subscription.cpp.o
+[18.495s] [ 90%] Linking CXX executable zhongli_bridge_node
+[18.769s] [ 90%] Built target zhongli_bridge_node
+[21.056s] [100%] Linking CXX executable test_real_plan_subscription
+[21.473s] [100%] Built target test_real_plan_subscription
+[21.481s] Invoked command in '/home/yhg/Documents/docs/zhongli/cpp_version/build/ros2_zhongli_bridge_cpp' returned '0': CMAKE_PREFIX_PATH=/opt/ros/humble /usr/bin/cmake --build /home/yhg/Documents/docs/zhongli/cpp_version/build/ros2_zhongli_bridge_cpp -- -j20 -l20
+[21.490s] Invoking command in '/home/yhg/Documents/docs/zhongli/cpp_version/build/ros2_zhongli_bridge_cpp': CMAKE_PREFIX_PATH=/opt/ros/humble /usr/bin/cmake --install /home/yhg/Documents/docs/zhongli/cpp_version/build/ros2_zhongli_bridge_cpp
+[21.500s] -- Install configuration: ""
+[21.501s] -- Execute custom install script
+[21.501s] -- Up-to-date symlink: /home/yhg/Documents/docs/zhongli/cpp_version/install/ros2_zhongli_bridge_cpp/bin/zhongli_bridge_node
+[21.501s] -- Up-to-date symlink: /home/yhg/Documents/docs/zhongli/cpp_version/install/ros2_zhongli_bridge_cpp/lib/libzhongli_protocol_types.so
+[21.502s] -- Up-to-date symlink: /home/yhg/Documents/docs/zhongli/cpp_version/install/ros2_zhongli_bridge_cpp/lib/libzhongli_mqtt_client.so
+[21.502s] -- Up-to-date symlink: /home/yhg/Documents/docs/zhongli/cpp_version/install/ros2_zhongli_bridge_cpp/lib/libros2_zhongli_bridge.so
+[21.503s] -- Up-to-date symlink: /home/yhg/Documents/docs/zhongli/cpp_version/install/ros2_zhongli_bridge_cpp/share/ros2_zhongli_bridge_cpp/config//bridge_config.yaml
+[21.503s] -- Up-to-date symlink: /home/yhg/Documents/docs/zhongli/cpp_version/install/ros2_zhongli_bridge_cpp/bin/test_real_plan_subscription
+[21.503s] -- Up-to-date symlink: /home/yhg/Documents/docs/zhongli/cpp_version/install/ros2_zhongli_bridge_cpp/share/ament_index/resource_index/package_run_dependencies/ros2_zhongli_bridge_cpp
+[21.504s] -- Up-to-date symlink: /home/yhg/Documents/docs/zhongli/cpp_version/install/ros2_zhongli_bridge_cpp/share/ament_index/resource_index/parent_prefix_path/ros2_zhongli_bridge_cpp
+[21.504s] -- Up-to-date symlink: /home/yhg/Documents/docs/zhongli/cpp_version/install/ros2_zhongli_bridge_cpp/share/ros2_zhongli_bridge_cpp/environment/ament_prefix_path.sh
+[21.504s] -- Up-to-date symlink: /home/yhg/Documents/docs/zhongli/cpp_version/install/ros2_zhongli_bridge_cpp/share/ros2_zhongli_bridge_cpp/environment/ament_prefix_path.dsv
+[21.504s] -- Up-to-date symlink: /home/yhg/Documents/docs/zhongli/cpp_version/install/ros2_zhongli_bridge_cpp/share/ros2_zhongli_bridge_cpp/environment/path.sh
+[21.504s] -- Up-to-date symlink: /home/yhg/Documents/docs/zhongli/cpp_version/install/ros2_zhongli_bridge_cpp/share/ros2_zhongli_bridge_cpp/environment/path.dsv
+[21.504s] -- Up-to-date symlink: /home/yhg/Documents/docs/zhongli/cpp_version/install/ros2_zhongli_bridge_cpp/share/ros2_zhongli_bridge_cpp/local_setup.bash
+[21.504s] -- Up-to-date symlink: /home/yhg/Documents/docs/zhongli/cpp_version/install/ros2_zhongli_bridge_cpp/share/ros2_zhongli_bridge_cpp/local_setup.sh
+[21.505s] -- Up-to-date symlink: /home/yhg/Documents/docs/zhongli/cpp_version/install/ros2_zhongli_bridge_cpp/share/ros2_zhongli_bridge_cpp/local_setup.zsh
+[21.505s] -- Up-to-date symlink: /home/yhg/Documents/docs/zhongli/cpp_version/install/ros2_zhongli_bridge_cpp/share/ros2_zhongli_bridge_cpp/local_setup.dsv
+[21.505s] -- Symlinking: /home/yhg/Documents/docs/zhongli/cpp_version/install/ros2_zhongli_bridge_cpp/share/ros2_zhongli_bridge_cpp/package.dsv
+[21.511s] -- Up-to-date symlink: /home/yhg/Documents/docs/zhongli/cpp_version/install/ros2_zhongli_bridge_cpp/share/ament_index/resource_index/packages/ros2_zhongli_bridge_cpp
+[21.511s] -- Up-to-date symlink: /home/yhg/Documents/docs/zhongli/cpp_version/install/ros2_zhongli_bridge_cpp/share/ros2_zhongli_bridge_cpp/cmake/ros2_zhongli_bridge_cppConfig.cmake
+[21.511s] -- Up-to-date symlink: /home/yhg/Documents/docs/zhongli/cpp_version/install/ros2_zhongli_bridge_cpp/share/ros2_zhongli_bridge_cpp/cmake/ros2_zhongli_bridge_cppConfig-version.cmake
+[21.511s] -- Up-to-date symlink: /home/yhg/Documents/docs/zhongli/cpp_version/install/ros2_zhongli_bridge_cpp/share/ros2_zhongli_bridge_cpp/package.xml
+[21.512s] Invoked command in '/home/yhg/Documents/docs/zhongli/cpp_version/build/ros2_zhongli_bridge_cpp' returned '0': CMAKE_PREFIX_PATH=/opt/ros/humble /usr/bin/cmake --install /home/yhg/Documents/docs/zhongli/cpp_version/build/ros2_zhongli_bridge_cpp

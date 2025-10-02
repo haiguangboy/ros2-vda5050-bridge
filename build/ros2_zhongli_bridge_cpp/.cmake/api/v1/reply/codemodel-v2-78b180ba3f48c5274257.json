@@ -1,0 +1,150 @@
+{
+	"configurations" : 
+	[
+		{
+			"directories" : 
+			[
+				{
+					"build" : ".",
+					"childIndexes" : 
+					[
+						1,
+						2
+					],
+					"hasInstallRule" : true,
+					"jsonFile" : "directory-.-0eb15767587655ac42d6.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.12"
+					},
+					"projectIndex" : 0,
+					"source" : ".",
+					"targetIndexes" : 
+					[
+						1,
+						3,
+						4
+					]
+				},
+				{
+					"build" : "src/lib",
+					"jsonFile" : "directory-src.lib-13ebd6f46d3a8d26f167.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.16"
+					},
+					"parentIndex" : 0,
+					"projectIndex" : 0,
+					"source" : "src/lib",
+					"targetIndexes" : 
+					[
+						0,
+						5,
+						6
+					]
+				},
+				{
+					"build" : "src/tests",
+					"jsonFile" : "directory-src.tests-115a8c61f2ecd2030e99.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.16"
+					},
+					"parentIndex" : 0,
+					"projectIndex" : 0,
+					"source" : "src/tests",
+					"targetIndexes" : 
+					[
+						2
+					]
+				}
+			],
+			"name" : "",
+			"projects" : 
+			[
+				{
+					"directoryIndexes" : 
+					[
+						0,
+						1,
+						2
+					],
+					"name" : "ros2_zhongli_bridge_cpp",
+					"targetIndexes" : 
+					[
+						0,
+						1,
+						2,
+						3,
+						4,
+						5,
+						6
+					]
+				}
+			],
+			"targets" : 
+			[
+				{
+					"directoryIndex" : 1,
+					"id" : "ros2_zhongli_bridge::@dc1a1c76835bc3d8b019",
+					"jsonFile" : "target-ros2_zhongli_bridge-3830876a6aaab51392d4.json",
+					"name" : "ros2_zhongli_bridge",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "ros2_zhongli_bridge_cpp_uninstall::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-ros2_zhongli_bridge_cpp_uninstall-6fddd1873e3573cc55e4.json",
+					"name" : "ros2_zhongli_bridge_cpp_uninstall",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 2,
+					"id" : "test_real_plan_subscription::@08b4cb1648a15a99be29",
+					"jsonFile" : "target-test_real_plan_subscription-0a081db0305ac545401a.json",
+					"name" : "test_real_plan_subscription",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "uninstall::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-uninstall-f47f980934a6bf44ac4d.json",
+					"name" : "uninstall",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "zhongli_bridge_node::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-zhongli_bridge_node-5a59b73ad03922b815cf.json",
+					"name" : "zhongli_bridge_node",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 1,
+					"id" : "zhongli_mqtt_client::@dc1a1c76835bc3d8b019",
+					"jsonFile" : "target-zhongli_mqtt_client-4d65096a2ee2d2d4fd1d.json",
+					"name" : "zhongli_mqtt_client",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 1,
+					"id" : "zhongli_protocol_types::@dc1a1c76835bc3d8b019",
+					"jsonFile" : "target-zhongli_protocol_types-c1fe37416b3e0db68256.json",
+					"name" : "zhongli_protocol_types",
+					"projectIndex" : 0
+				}
+			]
+		}
+	],
+	"kind" : "codemodel",
+	"paths" : 
+	{
+		"build" : "/home/yhg/Documents/docs/zhongli/cpp_version/build/ros2_zhongli_bridge_cpp",
+		"source" : "/home/yhg/Documents/docs/zhongli/cpp_version"
+	},
+	"version" : 
+	{
+		"major" : 2,
+		"minor" : 3
+	}
+}

@@ -1,0 +1,214 @@
+[0.000000] (-) TimerEvent: {}
+[0.000074] (ros2_zhongli_bridge_cpp) JobQueued: {'identifier': 'ros2_zhongli_bridge_cpp', 'dependencies': OrderedDict()}
+[0.000097] (ros2_zhongli_bridge_cpp) JobStarted: {'identifier': 'ros2_zhongli_bridge_cpp'}
+[0.007266] (ros2_zhongli_bridge_cpp) JobProgress: {'identifier': 'ros2_zhongli_bridge_cpp', 'progress': 'cmake'}
+[0.008492] (ros2_zhongli_bridge_cpp) JobProgress: {'identifier': 'ros2_zhongli_bridge_cpp', 'progress': 'build'}
+[0.009482] (ros2_zhongli_bridge_cpp) Command: {'cmd': ['/usr/bin/cmake', '--build', '/home/yhg/Documents/docs/zhongli/cpp_version/build/ros2_zhongli_bridge_cpp', '--', '-j20', '-l20'], 'cwd': '/home/yhg/Documents/docs/zhongli/cpp_version/build/ros2_zhongli_bridge_cpp', 'env': OrderedDict([('LESSOPEN', '| /usr/bin/lesspipe %s'), ('HTTPS_PROXY', 'http://127.0.0.1:7890/'), ('no_proxy', 'localhost,127.0.0.0/8,::1'), ('LANGUAGE', 'en_US:en'), ('USER', 'yhg'), ('CLAUDE_CODE_ENTRYPOINT', 'cli'), ('LC_TIME', 'en_US.UTF-8'), ('GIT_EDITOR', 'true'), ('all_proxy', 'socks://127.0.0.1:7890/'), ('XDG_SESSION_TYPE', 'x11'), ('ALLUSERSPROFILE', '/opt/MVS/MVFG'), ('SHLVL', '2'), ('LIBGL_ALWAYS_SOFTWARE', '1'), ('LD_LIBRARY_PATH', '/opt/MVS/lib/64:/opt/MVS/lib/32:/opt/MVS/lib/64:/opt/MVS/lib/32:/home/yhg/Documents/livo2_localization_ws/install/open3d_loc/lib/open3d_loc:/opt/MVS/lib/64:/opt/MVS/lib/32:/usr/lib/x86_64-linux-gnu/gazebo-11/plugins:/opt/ros/humble/opt/rviz_ogre_vendor/lib:/opt/ros/humble/lib/x86_64-linux-gnu:/opt/ros/humble/opt/openvdb_vendor/lib:/opt/ros/humble/lib:/opt/MVS/lib/64:/opt/MVS/lib/32:/opt/MVS/lib/64:/opt/MVS/lib/32:'), ('HOME', '/home/yhg'), ('OLDPWD', '/home/yhg/Documents'), ('DESKTOP_SESSION', 'ubuntu-xorg'), ('NO_PROXY', 'localhost,127.0.0.0/8,::1'), ('ROS_PYTHON_VERSION', '3'), ('GNOME_SHELL_SESSION_MODE', 'ubuntu'), ('GTK_MODULES', 'gail:atk-bridge'), ('LC_MONETARY', 'en_US.UTF-8'), ('SYSTEMD_EXEC_PID', '54136'), ('OCL_ICD_VENDORS', '/dev/null'), ('DBUS_SESSION_BUS_ADDRESS', 'unix:path=/run/user/1000/bus'), ('COLORTERM', 'truecolor'), ('MANDATORY_PATH', '/usr/share/gconf/ubuntu-xorg.mandatory.path'), ('QT_QPA_PLATFORMTHEME', 'qt5ct'), ('IM_CONFIG_PHASE', '1'), ('https_proxy', 'http://127.0.0.1:7890/'), ('ROS_DISTRO', 'humble'), ('GTK_IM_MODULE', 'fcitx'), ('LOGNAME', 'yhg'), ('ALL_PROXY', 'socks://127.0.0.1:7890/'), ('http_proxy', 'http://127.0.0.1:7890/'), ('_', '/usr/bin/colcon'), ('ROS_VERSION', '2'), ('XDG_SESSION_CLASS', 'user'), ('DEFAULTS_PATH', '/usr/share/gconf/ubuntu-xorg.default.path'), ('USERNAME', 'yhg'), ('TERM', 'xterm-256color'), ('OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE', 'delta'), ('GNOME_DESKTOP_SESSION_ID', 'this-is-deprecated'), ('ROS_LOCALHOST_ONLY', '0'), ('WINDOWPATH', '2'), ('MVCAM_SDK_PATH', '/opt/MVS'), ('PATH', '/home/yhg/.npm-global/bin:/opt/ros/humble/bin:/home/yhg/.local/bin:/home/yhg/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin:/snap/bin'), ('SESSION_MANAGER', 'local/yhg:@/tmp/.ICE-unix/2490,unix/yhg:/tmp/.ICE-unix/2490'), ('MVCAM_GENICAM_CLPROTOCOL', '/opt/MVS/lib/CLProtocol'), ('PAPERSIZE', 'letter'), ('COREPACK_ENABLE_AUTO_PIN', '0'), ('XDG_MENU_PREFIX', 'gnome-'), ('LC_ADDRESS', 'en_US.UTF-8'), ('ftp_proxy', 'http://127.0.0.1:7890/'), ('GNOME_TERMINAL_SCREEN', '/org/gnome/Terminal/screen/ad20f927_cfd2_4a83_aacb_aab0b827f056'), ('XDG_RUNTIME_DIR', '/run/user/1000'), ('DISPLAY', ':1'), ('NoDefaultCurrentDirectoryInExePath', '1'), ('LANG', 'en_US.UTF-8'), ('XDG_CURRENT_DESKTOP', 'ubuntu:GNOME'), ('LC_TELEPHONE', 'en_US.UTF-8'), ('RMW_IMPLEMENTATION', 'rmw_fastrtps_cpp'), ('XMODIFIERS', '@im=fcitx'), ('XDG_SESSION_DESKTOP', 'ubuntu-xorg'), ('XAUTHORITY', '/run/user/1000/gdm/Xauthority'), ('LS_COLORS', 'rs=0:di=01;34:ln=01;36:mh=00:pi=40;33:so=01;35:do=01;35:bd=40;33;01:cd=40;33;01:or=40;31;01:mi=00:su=37;41:sg=30;43:ca=30;41:tw=30;42:ow=34;42:st=37;44:ex=01;32:*.tar=01;31:*.tgz=01;31:*.arc=01;31:*.arj=01;31:*.taz=01;31:*.lha=01;31:*.lz4=01;31:*.lzh=01;31:*.lzma=01;31:*.tlz=01;31:*.txz=01;31:*.tzo=01;31:*.t7z=01;31:*.zip=01;31:*.z=01;31:*.dz=01;31:*.gz=01;31:*.lrz=01;31:*.lz=01;31:*.lzo=01;31:*.xz=01;31:*.zst=01;31:*.tzst=01;31:*.bz2=01;31:*.bz=01;31:*.tbz=01;31:*.tbz2=01;31:*.tz=01;31:*.deb=01;31:*.rpm=01;31:*.jar=01;31:*.war=01;31:*.ear=01;31:*.sar=01;31:*.rar=01;31:*.alz=01;31:*.ace=01;31:*.zoo=01;31:*.cpio=01;31:*.7z=01;31:*.rz=01;31:*.cab=01;31:*.wim=01;31:*.swm=01;31:*.dwm=01;31:*.esd=01;31:*.jpg=01;35:*.jpeg=01;35:*.mjpg=01;35:*.mjpeg=01;35:*.gif=01;35:*.bmp=01;35:*.pbm=01;35:*.pgm=01;35:*.ppm=01;35:*.tga=01;35:*.xbm=01;35:*.xpm=01;35:*.tif=01;35:*.tiff=01;35:*.png=01;35:*.svg=01;35:*.svgz=01;35:*.mng=01;35:*.pcx=01;35:*.mov=01;35:*.mpg=01;35:*.mpeg=01;35:*.m2v=01;35:*.mkv=01;35:*.webm=01;35:*.webp=01;35:*.ogm=01;35:*.mp4=01;35:*.m4v=01;35:*.mp4v=01;35:*.vob=01;35:*.qt=01;35:*.nuv=01;35:*.wmv=01;35:*.asf=01;35:*.rm=01;35:*.rmvb=01;35:*.flc=01;35:*.avi=01;35:*.fli=01;35:*.flv=01;35:*.gl=01;35:*.dl=01;35:*.xcf=01;35:*.xwd=01;35:*.yuv=01;35:*.cgm=01;35:*.emf=01;35:*.ogv=01;35:*.ogx=01;35:*.aac=00;36:*.au=00;36:*.flac=00;36:*.m4a=00;36:*.mid=00;36:*.midi=00;36:*.mka=00;36:*.mp3=00;36:*.mpc=00;36:*.ogg=00;36:*.ra=00;36:*.wav=00;36:*.oga=00;36:*.opus=00;36:*.spx=00;36:*.xspf=00;36:'), ('GNOME_TERMINAL_SERVICE', ':1.636'), ('SSH_AGENT_LAUNCHER', 'gnome-keyring'), ('SSH_AUTH_SOCK', '/run/user/1000/keyring/ssh'), ('ROS_DOMAIN_ID', '20'), ('AMENT_PREFIX_PATH', '/opt/ros/humble'), ('SHELL', '/bin/bash'), ('LC_NAME', 'en_US.UTF-8'), ('QT_ACCESSIBILITY', '1'), ('GDMSESSION', 'ubuntu-xorg'), ('LESSCLOSE', '/usr/bin/lesspipe %s %s'), ('CLAUDECODE', '1'), ('LC_MEASUREMENT', 'en_US.UTF-8'), ('GPG_AGENT_INFO', '/run/user/1000/gnupg/S.gpg-agent:0:1'), ('LC_IDENTIFICATION', 'en_US.UTF-8'), ('QT_IM_MODULE', 'fcitx'), ('PWD', '/home/yhg/Documents/docs/zhongli/cpp_version/build/ros2_zhongli_bridge_cpp'), ('XDG_CONFIG_DIRS', '/etc/xdg/xdg-ubuntu-xorg:/etc/xdg'), ('CLUTTER_IM_MODULE', 'xim'), ('FTP_PROXY', 'http://127.0.0.1:7890/'), ('XDG_DATA_DIRS', '/usr/share/ubuntu-xorg:/usr/share/gnome:/home/yhg/.local/share/flatpak/exports/share:/var/lib/flatpak/exports/share:/usr/local/share/:/usr/share/:/var/lib/snapd/desktop'), ('PYTHONPATH', '/opt/ros/humble/lib/python3.10/site-packages:/opt/ros/humble/local/lib/python3.10/dist-packages'), ('HTTP_PROXY', 'http://127.0.0.1:7890/'), ('LC_NUMERIC', 'en_US.UTF-8'), ('LC_PAPER', 'en_US.UTF-8'), ('COLCON', '1'), ('VTE_VERSION', '6800'), ('MVCAM_COMMON_RUNENV', '/opt/MVS/lib'), ('CMAKE_PREFIX_PATH', '/opt/ros/humble')]), 'shell': False}
+[0.099473] (-) TimerEvent: {}
+[0.121820] (ros2_zhongli_bridge_cpp) StdoutLine: {'line': b'Consolidate compiler generated dependencies of target zhongli_protocol_types\n'}
+[0.148091] (ros2_zhongli_bridge_cpp) StdoutLine: {'line': b'[  9%] Building CXX object src/lib/CMakeFiles/zhongli_protocol_types.dir/zhongli_protocol_types.cpp.o\n'}
+[0.199591] (-) TimerEvent: {}
+[0.299779] (-) TimerEvent: {}
+[0.399943] (-) TimerEvent: {}
+[0.500133] (-) TimerEvent: {}
+[0.600264] (-) TimerEvent: {}
+[0.700411] (-) TimerEvent: {}
+[0.800557] (-) TimerEvent: {}
+[0.900740] (-) TimerEvent: {}
+[1.000927] (-) TimerEvent: {}
+[1.101094] (-) TimerEvent: {}
+[1.129144] (ros2_zhongli_bridge_cpp) StdoutLine: {'line': b'[ 18%] Linking CXX shared library libzhongli_protocol_types.so\n'}
+[1.201194] (-) TimerEvent: {}
+[1.210550] (ros2_zhongli_bridge_cpp) StdoutLine: {'line': b'[ 18%] Built target zhongli_protocol_types\n'}
+[1.223469] (ros2_zhongli_bridge_cpp) StdoutLine: {'line': b'Consolidate compiler generated dependencies of target zhongli_mqtt_client\n'}
+[1.240564] (ros2_zhongli_bridge_cpp) StdoutLine: {'line': b'[ 27%] Building CXX object src/lib/CMakeFiles/zhongli_mqtt_client.dir/zhongli_mqtt_client.cpp.o\n'}
+[1.301237] (-) TimerEvent: {}
+[1.401414] (-) TimerEvent: {}
+[1.501588] (-) TimerEvent: {}
+[1.601758] (-) TimerEvent: {}
+[1.702008] (-) TimerEvent: {}
+[1.802187] (-) TimerEvent: {}
+[1.902364] (-) TimerEvent: {}
+[2.002558] (-) TimerEvent: {}
+[2.102699] (-) TimerEvent: {}
+[2.202840] (-) TimerEvent: {}
+[2.302975] (-) TimerEvent: {}
+[2.403207] (-) TimerEvent: {}
+[2.503362] (-) TimerEvent: {}
+[2.603530] (-) TimerEvent: {}
+[2.703670] (-) TimerEvent: {}
+[2.803849] (-) TimerEvent: {}
+[2.904006] (-) TimerEvent: {}
+[2.937332] (ros2_zhongli_bridge_cpp) StdoutLine: {'line': b'[ 36%] Linking CXX shared library libzhongli_mqtt_client.so\n'}
+[3.004125] (-) TimerEvent: {}
+[3.015332] (ros2_zhongli_bridge_cpp) StdoutLine: {'line': b'[ 36%] Built target zhongli_mqtt_client\n'}
+[3.030076] (ros2_zhongli_bridge_cpp) StdoutLine: {'line': b'Consolidate compiler generated dependencies of target ros2_zhongli_bridge\n'}
+[3.074992] (ros2_zhongli_bridge_cpp) StdoutLine: {'line': b'[ 45%] Building CXX object src/lib/CMakeFiles/ros2_zhongli_bridge.dir/ros2_zhongli_bridge.cpp.o\n'}
+[3.075665] (ros2_zhongli_bridge_cpp) StdoutLine: {'line': b'[ 54%] Building CXX object src/lib/CMakeFiles/ros2_zhongli_bridge.dir/path_converter.cpp.o\n'}
+[3.104249] (-) TimerEvent: {}
+[3.204448] (-) TimerEvent: {}
+[3.304593] (-) TimerEvent: {}
+[3.404767] (-) TimerEvent: {}
+[3.504955] (-) TimerEvent: {}
+[3.605165] (-) TimerEvent: {}
+[3.705327] (-) TimerEvent: {}
+[3.805484] (-) TimerEvent: {}
+[3.905689] (-) TimerEvent: {}
+[4.005845] (-) TimerEvent: {}
+[4.106012] (-) TimerEvent: {}
+[4.206206] (-) TimerEvent: {}
+[4.306362] (-) TimerEvent: {}
+[4.406508] (-) TimerEvent: {}
+[4.506694] (-) TimerEvent: {}
+[4.606869] (-) TimerEvent: {}
+[4.644162] (ros2_zhongli_bridge_cpp) StderrLine: {'line': b'/home/yhg/Documents/docs/zhongli/cpp_version/src/lib/path_converter.cpp: In member function \xe2\x80\x98bool zhongli_bridge::PathConverter::validate_trajectory(const std::vector<zhongli_protocol::TrajectoryPoint>&)\xe2\x80\x99:\n'}
+[4.644628] (ros2_zhongli_bridge_cpp) StderrLine: {'line': b'/home/yhg/Documents/docs/zhongli/cpp_version/src/lib/path_converter.cpp:172:19: error: \xe2\x80\x98const struct zhongli_protocol::TrajectoryPoint\xe2\x80\x99 has no member named \xe2\x80\x98speed\xe2\x80\x99\n'}
+[4.644682] (ros2_zhongli_bridge_cpp) StderrLine: {'line': b'  172 |         if (point.speed < 0.0 || point.speed > 10.0) {  // \xe5\x90\x88\xe7\x90\x86\xe7\x9a\x84\xe9\x80\x9f\xe5\xba\xa6\xe8\x8c\x83\xe5\x9b\xb4\xef\xbc\x9a0-10 m/s\n'}
+[4.644709] (ros2_zhongli_bridge_cpp) StderrLine: {'line': b'      |                   ^~~~~\n'}
+[4.644732] (ros2_zhongli_bridge_cpp) StderrLine: {'line': b'/home/yhg/Documents/docs/zhongli/cpp_version/src/lib/path_converter.cpp:172:40: error: \xe2\x80\x98const struct zhongli_protocol::TrajectoryPoint\xe2\x80\x99 has no member named \xe2\x80\x98speed\xe2\x80\x99\n'}
+[4.644757] (ros2_zhongli_bridge_cpp) StderrLine: {'line': b'  172 |         if (point.speed < 0.0 || point.speed > 10.0) {  // \xe5\x90\x88\xe7\x90\x86\xe7\x9a\x84\xe9\x80\x9f\xe5\xba\xa6\xe8\x8c\x83\xe5\x9b\xb4\xef\xbc\x9a0-10 m/s\n'}
+[4.644779] (ros2_zhongli_bridge_cpp) StderrLine: {'line': b'      |                                        ^~~~~\n'}
+[4.706981] (-) TimerEvent: {}
+[4.807150] (-) TimerEvent: {}
+[4.875753] (ros2_zhongli_bridge_cpp) StderrLine: {'line': b'In file included from /opt/ros/humble/include/rclcpp/rclcpp/logging.hpp:24,\n'}
+[4.875863] (ros2_zhongli_bridge_cpp) StderrLine: {'line': b'                 from /opt/ros/humble/include/rclcpp/rclcpp/client.hpp:40,\n'}
+[4.875895] (ros2_zhongli_bridge_cpp) StderrLine: {'line': b'                 from /opt/ros/humble/include/rclcpp/rclcpp/callback_group.hpp:24,\n'}
+[4.875920] (ros2_zhongli_bridge_cpp) StderrLine: {'line': b'                 from /opt/ros/humble/include/rclcpp/rclcpp/any_executable.hpp:20,\n'}
+[4.875943] (ros2_zhongli_bridge_cpp) StderrLine: {'line': b'                 from /opt/ros/humble/include/rclcpp/rclcpp/memory_strategy.hpp:25,\n'}
+[4.875965] (ros2_zhongli_bridge_cpp) StderrLine: {'line': b'                 from /opt/ros/humble/include/rclcpp/rclcpp/memory_strategies.hpp:18,\n'}
+[4.875986] (ros2_zhongli_bridge_cpp) StderrLine: {'line': b'                 from /opt/ros/humble/include/rclcpp/rclcpp/executor_options.hpp:20,\n'}
+[4.876007] (ros2_zhongli_bridge_cpp) StderrLine: {'line': b'                 from /opt/ros/humble/include/rclcpp/rclcpp/executor.hpp:37,\n'}
+[4.876029] (ros2_zhongli_bridge_cpp) StderrLine: {'line': b'                 from /opt/ros/humble/include/rclcpp/rclcpp/executors/multi_threaded_executor.hpp:25,\n'}
+[4.876060] (ros2_zhongli_bridge_cpp) StderrLine: {'line': b'                 from /opt/ros/humble/include/rclcpp/rclcpp/executors.hpp:21,\n'}
+[4.876081] (ros2_zhongli_bridge_cpp) StderrLine: {'line': b'                 from /opt/ros/humble/include/rclcpp/rclcpp/rclcpp.hpp:155,\n'}
+[4.876100] (ros2_zhongli_bridge_cpp) StderrLine: {'line': b'                 from /home/yhg/Documents/docs/zhongli/cpp_version/src/include/ros2_zhongli_bridge.hpp:3,\n'}
+[4.876123] (ros2_zhongli_bridge_cpp) StderrLine: {'line': b'                 from /home/yhg/Documents/docs/zhongli/cpp_version/src/lib/ros2_zhongli_bridge.cpp:1:\n'}
+[4.876143] (ros2_zhongli_bridge_cpp) StderrLine: {'line': b'/home/yhg/Documents/docs/zhongli/cpp_version/src/lib/ros2_zhongli_bridge.cpp: In member function \xe2\x80\x98bool zhongli_bridge::ROS2ZhongliBridge::initialize()\xe2\x80\x99:\n'}
+[4.876165] (ros2_zhongli_bridge_cpp) StderrLine: {'line': b'/home/yhg/Documents/docs/zhongli/cpp_version/src/lib/ros2_zhongli_bridge.cpp:30:41: warning: zero-length gnu_printf format string [-Wformat-zero-length]\n'}
+[4.876186] (ros2_zhongli_bridge_cpp) StderrLine: {'line': b'   30 |         RCLCPP_INFO(this->get_logger(), "");\n'}
+[4.876210] (ros2_zhongli_bridge_cpp) StderrLine: {'line': b'      |                                         ^~\n'}
+[4.877677] (ros2_zhongli_bridge_cpp) StderrLine: {'line': b'/home/yhg/Documents/docs/zhongli/cpp_version/src/lib/ros2_zhongli_bridge.cpp:51:41: warning: zero-length gnu_printf format string [-Wformat-zero-length]\n'}
+[4.877703] (ros2_zhongli_bridge_cpp) StderrLine: {'line': b'   51 |         RCLCPP_INFO(this->get_logger(), "");\n'}
+[4.877725] (ros2_zhongli_bridge_cpp) StderrLine: {'line': b'      |                                         ^~\n'}
+[4.907331] (-) TimerEvent: {}
+[5.007482] (-) TimerEvent: {}
+[5.107746] (-) TimerEvent: {}
+[5.207932] (-) TimerEvent: {}
+[5.268290] (ros2_zhongli_bridge_cpp) StderrLine: {'line': b'gmake[2]: *** [src/lib/CMakeFiles/ros2_zhongli_bridge.dir/build.make:90: src/lib/CMakeFiles/ros2_zhongli_bridge.dir/path_converter.cpp.o] Error 1\n'}
+[5.268422] (ros2_zhongli_bridge_cpp) StderrLine: {'line': b'gmake[2]: *** Waiting for unfinished jobs....\n'}
+[5.308039] (-) TimerEvent: {}
+[5.408219] (-) TimerEvent: {}
+[5.508416] (-) TimerEvent: {}
+[5.608577] (-) TimerEvent: {}
+[5.708720] (-) TimerEvent: {}
+[5.808952] (-) TimerEvent: {}
+[5.909125] (-) TimerEvent: {}
+[6.009235] (-) TimerEvent: {}
+[6.109412] (-) TimerEvent: {}
+[6.209581] (-) TimerEvent: {}
+[6.309750] (-) TimerEvent: {}
+[6.409919] (-) TimerEvent: {}
+[6.510155] (-) TimerEvent: {}
+[6.610312] (-) TimerEvent: {}
+[6.710454] (-) TimerEvent: {}
+[6.810616] (-) TimerEvent: {}
+[6.910786] (-) TimerEvent: {}
+[7.010961] (-) TimerEvent: {}
+[7.111133] (-) TimerEvent: {}
+[7.211331] (-) TimerEvent: {}
+[7.311521] (-) TimerEvent: {}
+[7.411699] (-) TimerEvent: {}
+[7.511892] (-) TimerEvent: {}
+[7.612063] (-) TimerEvent: {}
+[7.712242] (-) TimerEvent: {}
+[7.812720] (-) TimerEvent: {}
+[7.912913] (-) TimerEvent: {}
+[8.013103] (-) TimerEvent: {}
+[8.113254] (-) TimerEvent: {}
+[8.213436] (-) TimerEvent: {}
+[8.313641] (-) TimerEvent: {}
+[8.413826] (-) TimerEvent: {}
+[8.514006] (-) TimerEvent: {}
+[8.614197] (-) TimerEvent: {}
+[8.714394] (-) TimerEvent: {}
+[8.814630] (-) TimerEvent: {}
+[8.914843] (-) TimerEvent: {}
+[9.017332] (-) TimerEvent: {}
+[9.120887] (-) TimerEvent: {}
+[9.224820] (-) TimerEvent: {}
+[9.328528] (-) TimerEvent: {}
+[9.430671] (-) TimerEvent: {}
+[9.533148] (-) TimerEvent: {}
+[9.634229] (-) TimerEvent: {}
+[9.736756] (-) TimerEvent: {}
+[9.837889] (-) TimerEvent: {}
+[9.938047] (-) TimerEvent: {}
+[10.038200] (-) TimerEvent: {}
+[10.138376] (-) TimerEvent: {}
+[10.240748] (-) TimerEvent: {}
+[10.341617] (-) TimerEvent: {}
+[10.441808] (-) TimerEvent: {}
+[10.542011] (-) TimerEvent: {}
+[10.642282] (-) TimerEvent: {}
+[10.742451] (-) TimerEvent: {}
+[10.842636] (-) TimerEvent: {}
+[10.942796] (-) TimerEvent: {}
+[11.043351] (-) TimerEvent: {}
+[11.145026] (-) TimerEvent: {}
+[11.246764] (-) TimerEvent: {}
+[11.347212] (-) TimerEvent: {}
+[11.447395] (-) TimerEvent: {}
+[11.547538] (-) TimerEvent: {}
+[11.647709] (-) TimerEvent: {}
+[11.747887] (-) TimerEvent: {}
+[11.848052] (-) TimerEvent: {}
+[11.948231] (-) TimerEvent: {}
+[12.050808] (-) TimerEvent: {}
+[12.154637] (-) TimerEvent: {}
+[12.255692] (-) TimerEvent: {}
+[12.355877] (-) TimerEvent: {}
+[12.458424] (-) TimerEvent: {}
+[12.561646] (-) TimerEvent: {}
+[12.662609] (-) TimerEvent: {}
+[12.762791] (-) TimerEvent: {}
+[12.863250] (-) TimerEvent: {}
+[12.966056] (-) TimerEvent: {}
+[13.067494] (-) TimerEvent: {}
+[13.170663] (-) TimerEvent: {}
+[13.274046] (-) TimerEvent: {}
+[13.377329] (-) TimerEvent: {}
+[13.480942] (-) TimerEvent: {}
+[13.584176] (-) TimerEvent: {}
+[13.687340] (-) TimerEvent: {}
+[13.790767] (-) TimerEvent: {}
+[13.893812] (-) TimerEvent: {}
+[13.997742] (-) TimerEvent: {}
+[14.100967] (-) TimerEvent: {}
+[14.204126] (-) TimerEvent: {}
+[14.307436] (-) TimerEvent: {}
+[14.410644] (-) TimerEvent: {}
+[14.513887] (-) TimerEvent: {}
+[14.617450] (-) TimerEvent: {}
+[14.721207] (-) TimerEvent: {}
+[14.824658] (-) TimerEvent: {}
+[14.928556] (-) TimerEvent: {}
+[15.032584] (-) TimerEvent: {}
+[15.135974] (-) TimerEvent: {}
+[15.239401] (-) TimerEvent: {}
+[15.342796] (-) TimerEvent: {}
+[15.446087] (-) TimerEvent: {}
+[15.547104] (-) TimerEvent: {}
+[15.647277] (-) TimerEvent: {}
+[15.747416] (-) TimerEvent: {}
+[15.847578] (-) TimerEvent: {}
+[15.947741] (-) TimerEvent: {}
+[16.047915] (-) TimerEvent: {}
+[16.148105] (-) TimerEvent: {}
+[16.248236] (-) TimerEvent: {}
+[16.348381] (-) TimerEvent: {}
+[16.446925] (ros2_zhongli_bridge_cpp) StderrLine: {'line': b'gmake[1]: *** [CMakeFiles/Makefile2:257: src/lib/CMakeFiles/ros2_zhongli_bridge.dir/all] Error 2\n'}
+[16.448001] (ros2_zhongli_bridge_cpp) StderrLine: {'line': b'gmake: *** [Makefile:146: all] Error 2\n'}
+[16.448431] (-) TimerEvent: {}
+[16.464864] (ros2_zhongli_bridge_cpp) CommandEnded: {'returncode': 2}
+[16.500531] (ros2_zhongli_bridge_cpp) JobEnded: {'identifier': 'ros2_zhongli_bridge_cpp', 'rc': 2}
+[16.510938] (-) EventReactorShutdown: {}

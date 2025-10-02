@@ -1,0 +1,1 @@
+ament_cmake_symlink_install_targets("TARGET_FILES" "/home/yhg/Documents/docs/zhongli/cpp_version/build/ros2_zhongli_bridge_cpp/src/tests/test_real_plan_subscription" "TARGETS" "test_real_plan_subscription" "DESTINATION" "bin")

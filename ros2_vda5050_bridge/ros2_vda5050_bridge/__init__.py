@@ -1,1 +1,0 @@
-# VDA5050 Bridge Package

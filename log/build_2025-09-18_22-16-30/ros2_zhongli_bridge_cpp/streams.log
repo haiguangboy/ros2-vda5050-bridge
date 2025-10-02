@@ -1,0 +1,13 @@
+[0.006s] Invoking command in '/home/yhg/Documents/docs/zhongli/cpp_version/build/ros2_zhongli_bridge_cpp': CMAKE_PREFIX_PATH=/opt/ros/humble /usr/bin/cmake --build /home/yhg/Documents/docs/zhongli/cpp_version/build/ros2_zhongli_bridge_cpp -- -j20 -l20
+[0.055s] [ 18%] Built target zhongli_protocol_types
+[0.083s] [ 36%] Built target zhongli_mqtt_client
+[0.121s] [ 45%] Building CXX object src/lib/CMakeFiles/ros2_zhongli_bridge.dir/ros2_zhongli_bridge.cpp.o
+[0.247s] In file included from /home/yhg/Documents/docs/zhongli/cpp_version/src/lib/ros2_zhongli_bridge.cpp:1:
+[0.247s] /home/yhg/Documents/docs/zhongli/cpp_version/src/include/ros2_zhongli_bridge.hpp:11:10: fatal error: actionlib_msgs/msg/goal_status.hpp: No such file or directory
+[0.247s]    11 | #include <actionlib_msgs/msg/goal_status.hpp>
+[0.247s]       |          ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+[0.247s] compilation terminated.
+[0.250s] gmake[2]: *** [src/lib/CMakeFiles/ros2_zhongli_bridge.dir/build.make:76: src/lib/CMakeFiles/ros2_zhongli_bridge.dir/ros2_zhongli_bridge.cpp.o] Error 1
+[0.250s] gmake[1]: *** [CMakeFiles/Makefile2:257: src/lib/CMakeFiles/ros2_zhongli_bridge.dir/all] Error 2
+[0.250s] gmake: *** [Makefile:146: all] Error 2
+[0.252s] Invoked command in '/home/yhg/Documents/docs/zhongli/cpp_version/build/ros2_zhongli_bridge_cpp' returned '2': CMAKE_PREFIX_PATH=/opt/ros/humble /usr/bin/cmake --build /home/yhg/Documents/docs/zhongli/cpp_version/build/ros2_zhongli_bridge_cpp -- -j20 -l20
