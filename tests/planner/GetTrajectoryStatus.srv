@@ -1,0 +1,10 @@
+# Query trajectory execution status
+# Request: trajectory ID to query
+string trajectory_id
+---
+# Response: status information
+bool found                 # 是否找到该轨迹
+string status              # pending | running | completed | failed
+string trajectory_id       # 轨迹ID
+uint64 timestamp           # 时间戳（毫秒）
+string message             # 附加消息

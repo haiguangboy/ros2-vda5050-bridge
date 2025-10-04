@@ -1,0 +1,16 @@
+# 异步导航到目标位姿
+# 立即返回轨迹ID，状态机可通过GetTrajectoryStatus查询执行状态
+
+# Request
+uint8 MODE_NORMAL=0
+uint8 MODE_FORK=1
+uint8 mode                        # 导航模式
+geometry_msgs/PoseStamped target  # 目标位姿
+float32 timeout_sec               # 超时时间（秒，0表示无限）
+
+---
+
+# Response（立即返回，不等待导航完成）
+bool accepted                     # 是否接受导航请求
+string trajectory_id              # 轨迹ID（用于后续状态查询）
+string message                    # 接受/拒绝的原因
