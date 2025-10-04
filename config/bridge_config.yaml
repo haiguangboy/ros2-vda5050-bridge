@@ -4,7 +4,7 @@ zhongli_bridge:
     robot_id: "robot-001"
 
     # MQTT配置
-    mqtt_broker_host: "localhost" #192.168.1.102
+    mqtt_broker_host: "192.168.1.102" #192.168.1.102
     mqtt_broker_port: 1883
 
     # 坐标系配置

@@ -1,0 +1,7 @@
+# Trajectory completion notification service
+# Called when a trajectory execution is completed
+string trajectory_id
+uint32 trajectory_index
+---
+bool acknowledged
+string message

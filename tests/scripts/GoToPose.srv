@@ -1,0 +1,13 @@
+# Navigate to target pose in map
+# mode: NORMAL or FORK
+uint8 MODE_NORMAL=0
+uint8 MODE_FORK=1
+uint8 mode
+geometry_msgs/PoseStamped target
+float32 timeout_sec
+# Optional pallet info (used when mode==MODE_FORK)
+geometry_msgs/Pose pallet_pose
+geometry_msgs/Vector3 pallet_size
+---
+bool arrived
+string message
