@@ -200,3 +200,184 @@ class SimpleTrajectoryPlanner:
             print(f"  点{len(waypoints):3d}: x={x:8.3f}, y={y:8.3f}, yaw={yaw:7.3f} ({math.degrees(yaw):6.1f}°)")
 
         print(f"{'='*80}\n")
+
+
+class ComplexTrajectoryPlanner:
+    """
+    复杂路径规划器
+    用于模拟多阶段轨迹规划，支持前向和后向运动
+
+    设计目标：
+    - 前向轨迹：左转90° → 前进 → 左转90°（模拟Traj1 + Traj2）
+    - 后向轨迹：倒车指定距离（模拟Traj3，flag=1, orientation=3.14）
+    """
+
+    def __init__(self, forward_step: float = 0.15, backward_step: float = 0.15):
+        """
+        初始化复杂路径规划器
+
+        Args:
+            forward_step: 前向移动路径点间距（米）
+            backward_step: 后向移动路径点间距（米）
+        """
+        self.forward_step = forward_step
+        self.backward_step = backward_step
+
+    def plan_forward_with_turns(self, start_pose: Pose,
+                                first_turn_angle: float,
+                                forward_distance: float,
+                                second_turn_angle: float) -> List[Tuple[float, float, float]]:
+        """
+        规划前向轨迹：左转 → 前进 → 左转
+        （组合Trajectory 1 + Trajectory 2）
+
+        Args:
+            start_pose: 起点Pose（geometry_msgs/Pose）
+            first_turn_angle: 第一次转弯角度（弧度，正值为左转）
+            forward_distance: 前进距离（米）
+            second_turn_angle: 第二次转弯角度（弧度，正值为左转）
+
+        Returns:
+            路径点列表 [(x, y, yaw), ...]
+        """
+        waypoints = []
+
+        # 提取起点信息
+        start_x = start_pose.position.x
+        start_y = start_pose.position.y
+        start_yaw = self._quaternion_to_yaw(start_pose.orientation)
+
+        print(f"\n📋 复杂前向轨迹规划:")
+        print(f"   起点: ({start_x:.3f}, {start_y:.3f}), yaw={start_yaw:.3f} ({math.degrees(start_yaw):.1f}°)")
+        print(f"   第一次左转: {math.degrees(first_turn_angle):.1f}°")
+        print(f"   前进距离: {forward_distance:.3f}m")
+        print(f"   第二次左转: {math.degrees(second_turn_angle):.1f}°")
+
+        current_x = start_x
+        current_y = start_y
+        current_yaw = start_yaw
+
+        # 阶段1: 第一次左转（原地旋转，只生成起点和终点）
+        print(f"   阶段1: 原地左转 {math.degrees(first_turn_angle):.1f}°")
+        yaw_after_first_turn = start_yaw + first_turn_angle
+        waypoints.append((current_x, current_y, current_yaw))  # 起点
+        waypoints.append((current_x, current_y, yaw_after_first_turn))  # 转弯后
+        current_yaw = yaw_after_first_turn
+
+        # 阶段2: 前进
+        num_forward_points = int(forward_distance / self.forward_step) + 1
+        print(f"   阶段2: 前进 {forward_distance:.3f}m (点间距{self.forward_step}m, {num_forward_points}个点)")
+
+        for i in range(1, num_forward_points + 1):
+            dist = i * self.forward_step
+            if dist > forward_distance:
+                dist = forward_distance
+            x = current_x + dist * math.cos(current_yaw)
+            y = current_y + dist * math.sin(current_yaw)
+            waypoints.append((x, y, current_yaw))
+
+        # 更新当前位置到前进终点
+        current_x = current_x + forward_distance * math.cos(current_yaw)
+        current_y = current_y + forward_distance * math.sin(current_yaw)
+
+        # 阶段3: 第二次左转（原地旋转，只生成终点）
+        print(f"   阶段3: 原地左转 {math.degrees(second_turn_angle):.1f}°")
+        yaw_after_second_turn = current_yaw + second_turn_angle
+        waypoints.append((current_x, current_y, yaw_after_second_turn))
+
+        print(f"   ✅ 前向轨迹规划完成: 共 {len(waypoints)} 个路径点")
+        print(f"   终点: ({current_x:.3f}, {current_y:.3f}), yaw={yaw_after_second_turn:.3f} ({math.degrees(yaw_after_second_turn):.1f}°)\n")
+
+        return waypoints
+
+    def plan_backward(self, start_pose: Pose, backward_distance: float) -> List[Tuple[float, float, float]]:
+        """
+        规划后向轨迹：沿当前朝向反方向倒车
+        （对应Trajectory 3，flag=1, orientation=3.14）
+
+        Args:
+            start_pose: 起点Pose（geometry_msgs/Pose）
+            backward_distance: 倒车距离（米）
+
+        Returns:
+            路径点列表 [(x, y, yaw), ...] - 朝向保持不变，位置沿反方向移动
+        """
+        waypoints = []
+
+        # 提取起点信息
+        start_x = start_pose.position.x
+        start_y = start_pose.position.y
+        start_yaw = self._quaternion_to_yaw(start_pose.orientation)
+
+        print(f"\n📋 后向轨迹规划 (倒车):")
+        print(f"   起点: ({start_x:.3f}, {start_y:.3f}), yaw={start_yaw:.3f} ({math.degrees(start_yaw):.1f}°)")
+        print(f"   倒车距离: {backward_distance:.3f}m")
+
+        # 计算倒车路径点数量
+        num_backward_points = int(backward_distance / self.backward_step) + 1
+        print(f"   生成路径点: {num_backward_points}个 (点间距{self.backward_step}m)")
+
+        # 生成倒车路径点（车辆倒退，沿着车尾方向移动，朝向保持不变）
+        # 注意：车头朝向start_yaw，车尾方向是start_yaw + π，倒车沿车尾方向移动
+        for i in range(num_backward_points):
+            dist = i * self.backward_step
+            if dist > backward_distance:
+                dist = backward_distance
+            # 倒车：车辆沿着车尾方向移动（车头朝向 + 180度）
+            backward_yaw = start_yaw + math.pi
+            x = start_x + dist * math.cos(backward_yaw)
+            y = start_y + dist * math.sin(backward_yaw)
+            waypoints.append((x, y, start_yaw))  # yaw保持不变（车头朝向）
+
+        backward_yaw = start_yaw + math.pi
+        end_x = start_x + backward_distance * math.cos(backward_yaw)
+        end_y = start_y + backward_distance * math.sin(backward_yaw)
+
+        print(f"   ✅ 后向轨迹规划完成: 共 {len(waypoints)} 个路径点")
+        print(f"   终点: ({end_x:.3f}, {end_y:.3f}), yaw={start_yaw:.3f} ({math.degrees(start_yaw):.1f}°)\n")
+
+        return waypoints
+
+    @staticmethod
+    def _quaternion_to_yaw(q: Quaternion) -> float:
+        """
+        将四元数转换为yaw角度（弧度）
+
+        Args:
+            q: geometry_msgs/Quaternion
+
+        Returns:
+            yaw角度（弧度）
+        """
+        siny_cosp = 2 * (q.w * q.z + q.x * q.y)
+        cosy_cosp = 1 - 2 * (q.y * q.y + q.z * q.z)
+        return math.atan2(siny_cosp, cosy_cosp)
+
+    def print_waypoints(self, waypoints: List[Tuple[float, float, float]], max_points: int = None):
+        """
+        打印路径点信息（用于调试）
+
+        Args:
+            waypoints: 路径点列表
+            max_points: 最多打印多少个点，None表示全部打印
+        """
+        if not waypoints:
+            print("⚠️  路径为空")
+            return
+
+        print(f"\n{'='*80}")
+        print(f"📍 路径点详情（共 {len(waypoints)} 个点）")
+        print(f"{'='*80}")
+
+        points_to_print = waypoints if max_points is None else waypoints[:max_points]
+
+        for i, (x, y, yaw) in enumerate(points_to_print, 1):
+            print(f"  点{i:3d}: x={x:8.3f}, y={y:8.3f}, yaw={yaw:7.3f} ({math.degrees(yaw):6.1f}°)")
+
+        if max_points and len(waypoints) > max_points:
+            print(f"  ... (省略 {len(waypoints) - max_points} 个点)")
+            print(f"\n  最后一个点:")
+            x, y, yaw = waypoints[-1]
+            print(f"  点{len(waypoints):3d}: x={x:8.3f}, y={y:8.3f}, yaw={yaw:7.3f} ({math.degrees(yaw):6.1f}°)")
+
+        print(f"{'='*80}\n")
