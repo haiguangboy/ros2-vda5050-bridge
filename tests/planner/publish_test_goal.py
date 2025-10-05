@@ -50,7 +50,7 @@ class GoalPublisher(Node):
         # 创建定时器，每0.1秒发布一次
         self.timer = self.create_timer(0.1, self.publish_goal)
         self.count = 0
-        self.max_count = 20  # 发布20次（2秒）
+        self.max_count = 1 # 发布20次（2秒）
 
         print(f"✅ 准备发布目标点到 /nav_goal:")
         print(f"   位置: ({x:.3f}, {y:.3f})")
