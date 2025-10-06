@@ -4,7 +4,7 @@ zhongli_bridge:
     robot_id: "robot-001"
 
     # MQTT配置
-    mqtt_broker_host: "localhost" #92.168.1.102
+    mqtt_broker_host: "192.168.1.102"
     mqtt_broker_port: 1883
 
     # 坐标系配置
@@ -19,7 +19,7 @@ zhongli_bridge:
     goal_tolerance_theta: 0.1 # 角度容差 (弧度)
 
     # 路径转换参数
-    default_max_speed: 2.0 # 默认最大速度 (米/秒)
+    default_max_speed: 0.15 #认最大速度 (米/秒)
 
     # MQTT QoS设置
     mqtt_qos: 1

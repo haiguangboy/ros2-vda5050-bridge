@@ -70,7 +70,7 @@ class GoToPoseClient(Node):
             print("="*80)
             print("📥 收到响应")
             print("="*80)
-            print(f"arrived: {response.arrived}")
+            print(f"accepted: {response.arrived}")  # arrived字段表示"是否接受"
             print(f"message: {response.message}")
             print("="*80 + "\n")
             return response
@@ -93,6 +93,13 @@ def main():
     print("🧪 GoToPose Service 测试")
     print("="*80)
     print("模拟调度器使用GoToPose.srv格式发送目标点")
+    print()
+    print("📝 说明：")
+    print("  - GoToPose service是同步调用，会阻塞直到轨迹执行完成")
+    print("  - arrived=True：机器人已到达目标点")
+    print("  - arrived=False：执行失败或超时")
+    print()
+    print("⚠️  注意：service调用会等待轨迹完成才返回，可能需要较长时间！")
     print("="*80)
     print()
 
@@ -107,23 +114,21 @@ def main():
         response1 = client.send_goal(x=3.0, y=0.5,yaw_deg=90, mode=GoToPose.Request.MODE_NORMAL)
 
         if response1 and response1.arrived:
-            print("✅ 观察点已接受\n")
-            print("💡 等待轨迹完成后，发送第2个目标点...\n")
-            input("按Enter继续发送取货点...")
+            print("✅ 观察点已到达！\n")
 
             # 发送第2个目标点（取货点）
-            print("\n" + "="*80)
+            print("="*80)
             print("步骤2: 发送取货点")
             print("="*80)
             response2 = client.send_goal(x=4.5, y=1.3,yaw_deg=-95,mode=GoToPose.Request.MODE_NORMAL)
 
             if response2 and response2.arrived:
-                print("✅ 取货点已接受\n")
-                print("🎉 所有目标点已发送！")
+                print("✅ 取货点已到达！\n")
+                print("🎉 所有任务完成！")
             else:
-                print("❌ 取货点被拒绝")
+                print("❌ 取货点执行失败或超时")
         else:
-            print("❌ 观察点被拒绝")
+            print("❌ 观察点执行失败或超时")
 
     except KeyboardInterrupt:
         print("\n⏹️  收到中断信号")

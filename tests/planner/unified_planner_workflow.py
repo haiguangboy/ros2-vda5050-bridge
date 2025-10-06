@@ -75,6 +75,7 @@ class UnifiedPlannerNode(Node):
         self.goal_count = 0  # 收到的目标点计数
         self.current_trajectory_id = None
         self.waiting_for_completion = False
+        self.trajectory_completed = False  # 轨迹是否完成的标志
 
         # ROS2发布器（用于更新Odom）
         self.odom_publisher = self.create_publisher(Odometry, ODOM_TOPIC, 10)
@@ -398,6 +399,8 @@ class UnifiedPlannerNode(Node):
         """
         处理GoToPose service请求（调度器格式）
 
+        注意：此方法会阻塞直到轨迹执行完成或超时
+
         请求格式：
         - mode: 0=NORMAL, 1=FORK
         - target: PoseStamped (目标位置)
@@ -457,11 +460,45 @@ class UnifiedPlannerNode(Node):
             print(f"规划策略: ComplexTrajectoryPlanner\n")
             self.plan_and_publish_complex(goal_pose)
 
-        # 返回响应（轨迹已开始规划）
-        response.arrived = True
-        response.message = f"目标点{self.goal_count}已接受，轨迹规划中"
-        print(f"📤 返回响应: {response.message}")
+        # ===== 等待轨迹完成 =====
         print("="*80)
+        print("⏳ 等待轨迹执行完成...")
+        print(f"   超时时间: {timeout:.1f}秒")
+        print("="*80 + "\n")
+
+        # 重置完成标志
+        self.trajectory_completed = False
+
+        # 等待轨迹完成，带超时
+        start_time = time.time()
+        check_interval = 0.1  # 100ms检查一次
+
+        while (time.time() - start_time) < timeout:
+            # 处理ROS2回调以接收MQTT消息
+            rclpy.spin_once(self, timeout_sec=check_interval)
+
+            # 检查是否完成
+            if self.trajectory_completed:
+                elapsed = time.time() - start_time
+                print("\n" + "="*80)
+                print(f"✅ 轨迹执行完成！耗时: {elapsed:.1f}秒")
+                print("="*80 + "\n")
+
+                response.arrived = True
+                response.message = f"目标点{self.goal_count}已到达"
+                print(f"📤 返回响应: arrived=True, message={response.message}")
+                print("="*80 + "\n")
+                return response
+
+        # 超时处理
+        print("\n" + "="*80)
+        print(f"⏱️  超时：轨迹执行超过 {timeout:.1f} 秒")
+        print("="*80 + "\n")
+
+        response.arrived = False
+        response.message = f"目标点{self.goal_count}执行超时"
+        print(f"📤 返回响应: arrived=False, message={response.message}")
+        print("="*80 + "\n")
 
         return response
 
@@ -500,6 +537,9 @@ class UnifiedPlannerNode(Node):
                     if hasattr(self, 'first_trajectory_waypoints'):
                         self.update_odom_from_trajectory_end(self.first_trajectory_waypoints)
 
+                    # 设置完成标志，通知GoToPose service
+                    self.trajectory_completed = True
+
                 # 如果是第2段的前向轨迹完成，发布后向轨迹
                 elif "pickup_forward" in trajectory_id:
                     # TODO: 生产环境有真实Odom时，注释掉下面这行
@@ -515,6 +555,9 @@ class UnifiedPlannerNode(Node):
                     print("🎉 所有轨迹已完成！")
                     print("✅ 观察点和取货点任务完成")
                     print("💡 程序将继续监听，按Ctrl+C退出\n")
+
+                    # 设置完成标志，通知GoToPose service
+                    self.trajectory_completed = True
 
         except Exception as e:
             print(f"❌ MQTT消息解析错误: {e}")
