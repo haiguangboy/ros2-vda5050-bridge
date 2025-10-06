@@ -24,7 +24,7 @@ class GoToPoseClient(Node):
 
         print("✅ Service 已就绪\n")
 
-    def send_goal(self, x, y, yaw_deg, mode=GoToPose.Request.MODE_NORMAL, timeout_sec=60.0):
+    def send_goal(self, x, y, yaw_deg, mode=GoToPose.Request.MODE_NORMAL, timeout_sec=200):
         """
         发送目标点
 
@@ -115,6 +115,10 @@ def main():
 
         if response1 and response1.arrived:
             print("✅ 观察点已到达！\n")
+
+            # 等待用户确认后再发送第二个目标点
+            input("👉 按Enter键继续发送第2个目标点（取货点）...")
+            print()
 
             # 发送第2个目标点（取货点）
             print("="*80)

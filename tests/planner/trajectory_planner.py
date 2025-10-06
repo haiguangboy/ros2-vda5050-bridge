@@ -292,15 +292,15 @@ class ComplexTrajectoryPlanner:
 
     def plan_backward(self, start_pose: Pose, backward_distance: float) -> List[Tuple[float, float, float]]:
         """
-        规划后向轨迹：沿当前朝向反方向倒车
+        规划后向轨迹：沿y轴方向移动指定距离（支持正负距离）
         （对应Trajectory 3，flag=1, orientation=3.14）
 
         Args:
             start_pose: 起点Pose（geometry_msgs/Pose）
-            backward_distance: 倒车距离（米）
+            backward_distance: 倒车距离（米），负数表示沿-y方向移动
 
         Returns:
-            路径点列表 [(x, y, yaw), ...] - 朝向保持不变，位置沿反方向移动
+            路径点列表 [(x, y, yaw), ...] - 朝向保持不变，位置沿y轴移动
         """
         waypoints = []
 
@@ -311,27 +311,31 @@ class ComplexTrajectoryPlanner:
 
         print(f"\n📋 后向轨迹规划 (倒车):")
         print(f"   起点: ({start_x:.3f}, {start_y:.3f}), yaw={start_yaw:.3f} ({math.degrees(start_yaw):.1f}°)")
-        print(f"   倒车距离: {backward_distance:.3f}m")
+        print(f"   Y方向位移: {backward_distance:.3f}m")
 
-        # 计算倒车路径点数量
-        num_backward_points = int(backward_distance / self.backward_step) + 1
+        # 计算倒车路径点数量（使用绝对值）
+        abs_distance = abs(backward_distance)
+        num_backward_points = int(abs_distance / self.backward_step) + 1
         print(f"   生成路径点: {num_backward_points}个 (点间距{self.backward_step}m)")
 
-        # 生成倒车路径点（车辆倒退，沿着车尾方向移动，朝向保持不变）
-        # 注意：车头朝向start_yaw，车尾方向是start_yaw + π，倒车沿车尾方向移动
+        # 生成倒车路径点（沿y轴方向移动，朝向保持不变）
+        # backward_distance为负时，沿-y方向移动
         for i in range(num_backward_points):
             dist = i * self.backward_step
-            if dist > backward_distance:
-                dist = backward_distance
-            # 倒车：车辆沿着车尾方向移动（车头朝向 + 180度）
-            backward_yaw = start_yaw + math.pi
-            x = start_x + dist * math.cos(backward_yaw)
-            y = start_y + dist * math.sin(backward_yaw)
-            waypoints.append((x, y, start_yaw))  # yaw保持不变（车头朝向）
+            if dist > abs_distance:
+                dist = abs_distance
 
-        backward_yaw = start_yaw + math.pi
-        end_x = start_x + backward_distance * math.cos(backward_yaw)
-        end_y = start_y + backward_distance * math.sin(backward_yaw)
+            # 沿y轴方向移动：如果backward_distance为负，则向-y移动
+            if backward_distance >= 0:
+                y = start_y + dist
+            else:
+                y = start_y - dist
+
+            waypoints.append((start_x, y, start_yaw))  # x保持不变，yaw保持不变
+
+        # 计算并打印终点
+        end_x = start_x
+        end_y = start_y + backward_distance
 
         print(f"   ✅ 后向轨迹规划完成: 共 {len(waypoints)} 个路径点")
         print(f"   终点: ({end_x:.3f}, {end_y:.3f}), yaw={start_yaw:.3f} ({math.degrees(start_yaw):.1f}°)\n")

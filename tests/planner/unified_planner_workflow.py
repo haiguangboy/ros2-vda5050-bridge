@@ -32,7 +32,7 @@ from trajectory_planner import SimpleTrajectoryPlanner, ComplexTrajectoryPlanner
 ODOM_TOPIC = "/Odom"
 GOAL_TOPIC = "/nav_goal"
 PATH_TOPIC = "/plans"
-MQTT_BROKER = "localhost"
+MQTT_BROKER = "192.168.1.102" #localhost for local test
 MQTT_PORT = 1883
 ROBOT_ID = "robot-001"
 
@@ -64,10 +64,14 @@ class UnifiedPlannerNode(Node):
         # ROS2发布器
         self.path_publisher = self.create_publisher(Path, PATH_TOPIC, 10)
 
-        # MQTT客户端
-        self.mqtt_client = mqtt.Client()
+        # MQTT客户端（使用唯一的client_id避免冲突）
+        self.mqtt_client = mqtt.Client(client_id="unified_planner_python", clean_session=True)
         self.mqtt_client.on_connect = self.on_mqtt_connect
         self.mqtt_client.on_message = self.on_mqtt_message
+        self.mqtt_client.on_subscribe = self.on_mqtt_subscribe
+
+        # 添加日志回调用于调试
+        self.mqtt_client.on_log = self.on_mqtt_log
 
         # 状态变量
         self.current_odom = None
@@ -230,12 +234,12 @@ class UnifiedPlannerNode(Node):
         print(f"📍 终点: ({goal_x:.3f}, {goal_y:.3f}), yaw={goal_yaw:.3f} ({math.degrees(goal_yaw):.1f}°)\n")
 
         # === 动态计算倒车距离 ===
-        # 倒车距离 = 目标点y坐标 - 起点y坐标
+        # 倒车距离 = 目标y - 起点y（标准位移计算）
         backward_distance = goal_y - start_y
 
         print(f"📐 自动计算轨迹分解:")
         print(f"   X方向距离: {goal_x - start_x:.3f} m")
-        print(f"   Y方向距离（倒车）: {backward_distance:.3f} m")
+        print(f"   Y方向距离（目标 - 起点）: {backward_distance:.3f} m")
         print(f"   总角度变化: {goal_yaw - start_yaw:.3f} rad ({math.degrees(goal_yaw - start_yaw):.1f}°)\n")
 
         # 第1段：前向轨迹（到达倒车起点）
@@ -358,10 +362,19 @@ class UnifiedPlannerNode(Node):
         if rc == 0:
             print("✅ MQTT连接成功")
             status_topic = f"EP/{ROBOT_ID}/cerebellum/embrain/trajectory_status"
-            self.mqtt_client.subscribe(status_topic)
-            print(f"📡 订阅轨迹状态主题: {status_topic}\n")
+            result, mid = self.mqtt_client.subscribe(status_topic)
+            print(f"📡 订阅轨迹状态主题: {status_topic}")
+            print(f"   订阅结果: result={result}, mid={mid}\n")
         else:
             print(f"❌ MQTT连接失败: {rc}")
+
+    def on_mqtt_subscribe(self, client, userdata, mid, granted_qos):
+        """MQTT订阅确认回调"""
+        print(f"✅ MQTT订阅确认: mid={mid}, QoS={granted_qos}\n")
+
+    def on_mqtt_log(self, client, userdata, level, buf):
+        """MQTT日志回调（用于调试）"""
+        print(f"🔍 MQTT日志: {buf}")
 
     def update_odom_from_trajectory_end(self, waypoints):
         """
@@ -511,6 +524,9 @@ class UnifiedPlannerNode(Node):
             timestamp = payload.get("timestamp", int(time.time() * 1000))
             message = payload.get("message", "")
 
+            # 打印所有MQTT消息（包括running状态）
+            print(f"📨 MQTT消息: ID={trajectory_id}, status={status}")
+
             # 更新轨迹状态记录
             self.last_trajectory_status = {
                 'trajectory_id': trajectory_id,
@@ -519,19 +535,24 @@ class UnifiedPlannerNode(Node):
                 'message': message
             }
 
-            if trajectory_id == self.current_trajectory_id and status == "completed":
+            # 处理轨迹完成信号
+            # 注意：由于MQTT Bridge可能生成不同的轨迹ID，我们放宽匹配条件
+            # 只要status是completed且waiting_for_completion为True，就认为是当前轨迹完成
+            if status == "completed" and self.waiting_for_completion:
                 print("\n" + "="*80)
                 print("📊 收到MQTT轨迹完成信号")
                 print("="*80)
-                print(f"📋 轨迹ID: {trajectory_id}")
+                print(f"📋 MQTT轨迹ID: {trajectory_id}")
+                print(f"📋 本地轨迹ID: {self.current_trajectory_id}")
                 print(f"📍 状态: {status}")
                 print("✅ 轨迹已完成！")
                 print("="*80 + "\n")
 
                 self.waiting_for_completion = False
 
+                # 根据本地轨迹ID判断是哪一段轨迹
                 # 如果是第1段轨迹（观察点）完成
-                if "observation" in trajectory_id:
+                if "observation" in self.current_trajectory_id:
                     # TODO: 生产环境有真实Odom时，注释掉下面这行
                     # 测试环境：将第1段轨迹终点更新到/Odom，供第2段使用
                     if hasattr(self, 'first_trajectory_waypoints'):
@@ -541,7 +562,7 @@ class UnifiedPlannerNode(Node):
                     self.trajectory_completed = True
 
                 # 如果是第2段的前向轨迹完成，发布后向轨迹
-                elif "pickup_forward" in trajectory_id:
+                elif "pickup_forward" in self.current_trajectory_id:
                     # TODO: 生产环境有真实Odom时，注释掉下面这行
                     # 测试环境：将前向轨迹终点更新到/Odom，供倒车使用
                     if hasattr(self, 'forward_trajectory_waypoints'):
@@ -551,7 +572,7 @@ class UnifiedPlannerNode(Node):
                     time.sleep(3)
                     self.publish_backward_trajectory()
 
-                elif "pickup_backward" in trajectory_id:
+                elif "pickup_backward" in self.current_trajectory_id:
                     print("🎉 所有轨迹已完成！")
                     print("✅ 观察点和取货点任务完成")
                     print("💡 程序将继续监听，按Ctrl+C退出\n")
