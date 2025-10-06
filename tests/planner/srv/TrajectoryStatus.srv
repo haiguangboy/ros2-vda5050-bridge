@@ -1,0 +1,11 @@
+# 轨迹状态查询服务
+# 请求：查询当前轨迹状态
+# 响应：返回轨迹状态信息
+
+---
+# 响应
+bool success                # 查询是否成功
+string trajectory_id        # 轨迹ID
+string status              # 状态: "no_data", "pending", "running", "completed", "failed"
+int64 timestamp            # 时间戳（毫秒）
+string message             # 状态描述信息

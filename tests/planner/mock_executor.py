@@ -101,7 +101,7 @@ class MockExecutor(Node):
         status_data = {
             "trajectoryId": trajectory_id,
             "status": status,
-            "timestamp": int(time.time() * 1000),
+            "timestamp": str(int(time.time() * 1000)),  # 转换为字符串以匹配C++解析器
             "message": message
         }
 

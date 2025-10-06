@@ -18,6 +18,8 @@ import rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import PoseStamped, Pose, PoseWithCovarianceStamped, Quaternion
 from nav_msgs.msg import Path, Odometry
+from example_interfaces.srv import Trigger
+from forklift_interfaces.srv import GoToPose
 import paho.mqtt.client as mqtt
 import json
 import time
@@ -34,8 +36,8 @@ MQTT_BROKER = "localhost"
 MQTT_PORT = 1883
 ROBOT_ID = "robot-001"
 
-# 倒车距离（取货点专用）
-BACKWARD_DISTANCE = 1.0
+# 倒车距离（取货点专用）- 注意：实际倒车距离会根据目标点的y坐标动态计算
+# BACKWARD_DISTANCE = 1.0  # 已废弃，改为动态计算
 
 # 默认位置（Odom超时时使用）
 DEFAULT_X = 0.0
@@ -77,9 +79,31 @@ class UnifiedPlannerNode(Node):
         # ROS2发布器（用于更新Odom）
         self.odom_publisher = self.create_publisher(Odometry, ODOM_TOPIC, 10)
 
+        # ROS2 Service服务器（提供轨迹状态查询）
+        self.status_service = self.create_service(
+            Trigger, '/trajectory_status', self.handle_status_query)
+
+        # ROS2 Service服务器（接收调度器的GoToPose请求）
+        self.go_to_pose_service = self.create_service(
+            GoToPose, '/go_to_pose', self.handle_go_to_pose)
+
+        # 轨迹状态记录
+        self.last_trajectory_status = {
+            'trajectory_id': '',
+            'status': 'no_data',
+            'timestamp': 0,
+            'message': '暂无轨迹数据'
+        }
+
+        # GoToPose请求队列（用于异步处理）
+        self.goto_request_queue = []
+        self.goto_response_future = None
+
         print("✅ 统一轨迹规划器已启动")
         print("   规划器1: SimpleTrajectoryPlanner（观察点）")
-        print("   规划器2: ComplexTrajectoryPlanner（取货点）\n")
+        print("   规划器2: ComplexTrajectoryPlanner（取货点）")
+        print("   Service: /trajectory_status（轨迹状态查询）")
+        print("   Service: /go_to_pose（接收调度器目标点）\n")
 
     def odom_callback(self, msg):
         """接收Odom数据"""
@@ -204,25 +228,30 @@ class UnifiedPlannerNode(Node):
         print(f"📍 起点: ({start_x:.3f}, {start_y:.3f}), yaw={start_yaw:.3f} ({math.degrees(start_yaw):.1f}°)")
         print(f"📍 终点: ({goal_x:.3f}, {goal_y:.3f}), yaw={goal_yaw:.3f} ({math.degrees(goal_yaw):.1f}°)\n")
 
-        # 第1段：前向轨迹（到达取货点前的位置）
-        # 计算中间点（倒车前的位置）
-        backward_yaw = goal_yaw + math.pi
-        intermediate_x = goal_x - BACKWARD_DISTANCE * math.cos(backward_yaw)
-        intermediate_y = goal_y - BACKWARD_DISTANCE * math.sin(backward_yaw)
+        # === 动态计算倒车距离 ===
+        # 倒车距离 = 目标点y坐标 - 起点y坐标
+        backward_distance = goal_y - start_y
 
-        print(f"📍 中间点（倒车前位置）:")
-        print(f"   位置: ({intermediate_x:.3f}, {intermediate_y:.3f})")
-        print(f"   朝向: {goal_yaw:.3f} ({math.degrees(goal_yaw):.1f}°)\n")
+        print(f"📐 自动计算轨迹分解:")
+        print(f"   X方向距离: {goal_x - start_x:.3f} m")
+        print(f"   Y方向距离（倒车）: {backward_distance:.3f} m")
+        print(f"   总角度变化: {goal_yaw - start_yaw:.3f} rad ({math.degrees(goal_yaw - start_yaw):.1f}°)\n")
 
-        # 计算前向轨迹参数
+        # 第1段：前向轨迹（到达倒车起点）
+        # 轨迹分解：
+        # 1. 从起点yaw转到0（第一次转弯）
+        # 2. 沿x轴前进到goal_x（前进）
+        # 3. 从0转到goal_yaw（第二次转弯）
+
         first_turn_angle = 0 - start_yaw
-        forward_distance = intermediate_x - start_x
+        forward_distance = goal_x - start_x
         second_turn_angle = goal_yaw - 0
 
         print(f"📐 前向轨迹参数:")
         print(f"   第一次转弯: {first_turn_angle:.3f} rad ({math.degrees(first_turn_angle):.1f}°)")
         print(f"   前进距离: {forward_distance:.3f} m")
-        print(f"   第二次转弯: {second_turn_angle:.3f} rad ({math.degrees(second_turn_angle):.1f}°)\n")
+        print(f"   第二次转弯: {second_turn_angle:.3f} rad ({math.degrees(second_turn_angle):.1f}°)")
+        print(f"   前向终点预期: ({goal_x:.3f}, {start_y:.3f}), yaw={goal_yaw:.3f}\n")
 
         # 规划前向轨迹
         forward_waypoints = self.complex_planner.plan_forward_with_turns(
@@ -247,8 +276,9 @@ class UnifiedPlannerNode(Node):
 
         # 保存后向轨迹参数，等待前向完成后发布
         self.backward_params = {
-            'intermediate_x': intermediate_x,
-            'intermediate_y': intermediate_y,
+            'backward_distance': backward_distance,  # 动态计算的倒车距离
+            'goal_x': goal_x,
+            'goal_y': goal_y,
             'goal_yaw': goal_yaw
         }
 
@@ -261,8 +291,17 @@ class UnifiedPlannerNode(Node):
         # 从/Odom读取当前位置（已被前向轨迹完成后更新）
         intermediate_pose = self.current_odom.pose.pose
 
+        # 获取动态计算的倒车距离
+        backward_distance = self.backward_params['backward_distance']
+        goal_x = self.backward_params['goal_x']
+        goal_y = self.backward_params['goal_y']
+
+        print(f"📐 倒车参数:")
+        print(f"   倒车距离: {backward_distance:.3f} m")
+        print(f"   倒车终点: ({goal_x:.3f}, {goal_y:.3f})\n")
+
         # 规划后向轨迹
-        backward_waypoints = self.complex_planner.plan_backward(intermediate_pose, BACKWARD_DISTANCE)
+        backward_waypoints = self.complex_planner.plan_backward(intermediate_pose, backward_distance)
 
         print(f"✅ 后向轨迹生成完成，共 {len(backward_waypoints)} 个路径点\n")
         self.print_all_waypoints(backward_waypoints)
@@ -270,7 +309,7 @@ class UnifiedPlannerNode(Node):
         # 发布后向轨迹
         backward_trajectory_id = f"pickup_backward_{int(time.time() * 1000)}"
         self.publish_path(backward_waypoints, backward_trajectory_id, orientation=3.14, flag=1,
-                         container_type="AGV-T300", container_x=5.0, container_y=2.0)
+                         container_type="AGV-T300", container_x=goal_x, container_y=goal_y)
         self.current_trajectory_id = backward_trajectory_id
         self.waiting_for_completion = True
 
@@ -349,12 +388,99 @@ class UnifiedPlannerNode(Node):
         print(f"📡 更新/Odom: ({end_x:.3f}, {end_y:.3f}), yaw={end_yaw:.3f} ({math.degrees(end_yaw):.1f}°)")
         print(f"   (测试模式：轨迹终点 → /Odom)\n")
 
+    def handle_status_query(self, request, response):
+        """处理轨迹状态查询service请求"""
+        response.success = True
+        response.message = json.dumps(self.last_trajectory_status)
+        return response
+
+    def handle_go_to_pose(self, request, response):
+        """
+        处理GoToPose service请求（调度器格式）
+
+        请求格式：
+        - mode: 0=NORMAL, 1=FORK
+        - target: PoseStamped (目标位置)
+        - timeout_sec: 超时时间
+        - pallet_pose: 托盘位置（mode=1时使用）
+        - pallet_size: 托盘尺寸（mode=1时使用）
+        """
+        print("\n" + "="*80)
+        print("📞 收到GoToPose请求（调度器）")
+        print("="*80)
+
+        mode = request.mode
+        target = request.target.pose
+        timeout = request.timeout_sec
+
+        x = target.position.x
+        y = target.position.y
+        yaw = self.quaternion_to_yaw(target.orientation)
+
+        mode_str = "NORMAL" if mode == GoToPose.Request.MODE_NORMAL else "FORK"
+        print(f"模式: {mode_str}")
+        print(f"目标: ({x:.3f}, {y:.3f}), yaw={yaw:.3f} ({math.degrees(yaw):.1f}°)")
+        print(f"超时: {timeout:.1f}秒")
+
+        if mode == GoToPose.Request.MODE_FORK:
+            pallet_x = request.pallet_pose.position.x
+            pallet_y = request.pallet_pose.position.y
+            print(f"托盘位置: ({pallet_x:.3f}, {pallet_y:.3f})")
+
+        # 检查是否可以接受新目标
+        if self.waiting_for_completion:
+            response.arrived = False
+            response.message = "上一段轨迹还在执行中，请稍后"
+            print("⚠️  拒绝请求：上一段轨迹未完成")
+            print("="*80)
+            return response
+
+        if self.goal_count >= 2:
+            response.arrived = False
+            response.message = "已完成2个目标点，请重启规划器"
+            print("⚠️  拒绝请求：已完成2个目标点")
+            print("="*80)
+            return response
+
+        # 将PoseStamped格式转换为内部处理
+        goal_pose = target
+
+        # 根据目标点数量选择规划器
+        self.goal_count += 1
+
+        if self.goal_count == 1:
+            print(f"✅ 接受为第1个目标点（观察点）")
+            print(f"规划策略: SimpleTrajectoryPlanner\n")
+            self.plan_and_publish_simple(goal_pose)
+        elif self.goal_count == 2:
+            print(f"✅ 接受为第2个目标点（取货点）")
+            print(f"规划策略: ComplexTrajectoryPlanner\n")
+            self.plan_and_publish_complex(goal_pose)
+
+        # 返回响应（轨迹已开始规划）
+        response.arrived = True
+        response.message = f"目标点{self.goal_count}已接受，轨迹规划中"
+        print(f"📤 返回响应: {response.message}")
+        print("="*80)
+
+        return response
+
     def on_mqtt_message(self, client, userdata, msg):
         """MQTT消息回调"""
         try:
             payload = json.loads(msg.payload.decode())
             trajectory_id = payload.get("trajectoryId")
             status = payload.get("status")
+            timestamp = payload.get("timestamp", int(time.time() * 1000))
+            message = payload.get("message", "")
+
+            # 更新轨迹状态记录
+            self.last_trajectory_status = {
+                'trajectory_id': trajectory_id,
+                'status': status,
+                'timestamp': timestamp,
+                'message': message
+            }
 
             if trajectory_id == self.current_trajectory_id and status == "completed":
                 print("\n" + "="*80)
@@ -471,7 +597,7 @@ def main():
     print("  python3 publish_test_goal.py --x 3.0 --y 0.0 --yaw-deg 90")
     print()
     print("第2步 - 等待第1段轨迹完成后，发布取货点：")
-    print("  python3 publish_test_goal.py --x 4.0 --y 1.0 --yaw-deg 90")
+    print("  python3 publish_test_goal.py --x 4.0 --y 1.0 --yaw-deg-90")
     print("="*80)
     print()
 
