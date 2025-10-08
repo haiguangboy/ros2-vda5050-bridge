@@ -32,12 +32,13 @@ from trajectory_planner import SimpleTrajectoryPlanner, ComplexTrajectoryPlanner
 ODOM_TOPIC = "/Odom"
 GOAL_TOPIC = "/nav_goal"
 PATH_TOPIC = "/plans"
-MQTT_BROKER = "192.168.1.102" #localhost for local test
+MQTT_BROKER = "192.168.1.102" #localhost for local test  192.168.1.102
 MQTT_PORT = 1883
 ROBOT_ID = "robot-001"
 
-# 倒车距离（取货点专用）- 注意：实际倒车距离会根据目标点的y坐标动态计算
-# BACKWARD_DISTANCE = 1.0  # 已废弃，改为动态计算
+# 误差消除轨迹配置
+ENABLE_CORRECTION_TRAJECTORY = True  # 是否启用误差消除轨迹（观察点完成后回正+倒车）
+CORRECTION_BACKWARD_DISTANCE = 0.6   # 误差消除轨迹的倒车距离（米）
 
 # 默认位置（Odom超时时使用）
 DEFAULT_X = 0.0
@@ -80,6 +81,8 @@ class UnifiedPlannerNode(Node):
         self.current_trajectory_id = None
         self.waiting_for_completion = False
         self.trajectory_completed = False  # 轨迹是否完成的标志
+        self.pending_pickup_goal = None  # 暂存第二个目标点（等待误差消除轨迹完成后使用）
+        self.pallet_info = None  # 托盘信息（mode=FORK时使用）
 
         # ROS2发布器（用于更新Odom）
         self.odom_publisher = self.create_publisher(Odometry, ODOM_TOPIC, 10)
@@ -108,7 +111,12 @@ class UnifiedPlannerNode(Node):
         print("   规划器1: SimpleTrajectoryPlanner（观察点）")
         print("   规划器2: ComplexTrajectoryPlanner（取货点）")
         print("   Service: /trajectory_status（轨迹状态查询）")
-        print("   Service: /go_to_pose（接收调度器目标点）\n")
+        print("   Service: /go_to_pose（接收调度器目标点）")
+        print(f"   误差消除轨迹: {'启用' if ENABLE_CORRECTION_TRAJECTORY else '禁用'}")
+        if ENABLE_CORRECTION_TRAJECTORY:
+            print(f"   - 倒车距离: {CORRECTION_BACKWARD_DISTANCE}米\n")
+        else:
+            print()
 
     def odom_callback(self, msg):
         """接收Odom数据"""
@@ -159,8 +167,16 @@ class UnifiedPlannerNode(Node):
             print("📍 第2个目标点（取货点）")
             print("="*80)
             print(f"目标位置: ({x:.3f}, {y:.3f}), 朝向: {yaw:.3f} ({math.degrees(yaw):.1f}°)")
-            print(f"规划策略: ComplexTrajectoryPlanner（转弯 + 前进 + 转弯 + 倒车）\n")
-            self.plan_and_publish_complex(goal_pose)
+
+            if ENABLE_CORRECTION_TRAJECTORY:
+                print(f"规划策略: 误差消除轨迹 + ComplexTrajectoryPlanner\n")
+                print(f"   步骤1: 回正 + 倒车{CORRECTION_BACKWARD_DISTANCE}米（消除旋转误差）")
+                print(f"   步骤2: 转弯 + 前进 + 转弯 + 倒车（到达取货点）\n")
+                self.pending_pickup_goal = goal_pose  # 保存目标点
+                self.plan_and_publish_correction_trajectory()
+            else:
+                print(f"规划策略: ComplexTrajectoryPlanner（转弯 + 前进 + 转弯 + 倒车）\n")
+                self.plan_and_publish_complex(goal_pose)
         else:
             print(f"📍 收到第{self.goal_count}个目标点")
             print("="*80)
@@ -214,6 +230,77 @@ class UnifiedPlannerNode(Node):
         print(f"📤 第1段轨迹已发布（观察点）")
         print(f"📋 轨迹ID: {trajectory_id}")
         print("⏳ 等待MQTT完成信号...\n")
+
+    def plan_and_publish_correction_trajectory(self):
+        """
+        规划并发布误差消除轨迹（观察点完成后）
+        流程：回正（-90° → 0°）+ 倒车0.6米（沿-x方向）
+        目的：消除旋转开环控制带来的x,y误差
+        """
+        print("🔧 规划误差消除轨迹（回正 + 倒车）...")
+        print("-"*80)
+
+        # 从/Odom获取当前实时位置（观察点终点）
+        start_pose = self.current_odom.pose.pose
+        start_x = start_pose.position.x
+        start_y = start_pose.position.y
+        start_yaw = self.quaternion_to_yaw(start_pose.orientation)
+
+        print(f"📍 起点（观察点终点）: ({start_x:.3f}, {start_y:.3f}), yaw={start_yaw:.3f} ({math.degrees(start_yaw):.1f}°)")
+        print(f"📐 倒车距离: {CORRECTION_BACKWARD_DISTANCE}米\n")
+
+        # 创建中间目标：回正到0° + 倒车
+        # 注意：右手坐标系，向右转90°是-90°，所以这里回正是从-90°到0°
+        target_yaw = 0.0  # 回正到0°
+
+        # 倒车后的位置：回正后车头朝向+x方向，倒车是沿-x方向
+        # 所以x减少CORRECTION_BACKWARD_DISTANCE，y保持不变
+        target_x = start_x - CORRECTION_BACKWARD_DISTANCE
+        target_y = start_y
+
+        print(f"📍 目标（回正+倒车后）: ({target_x:.3f}, {target_y:.3f}), yaw={target_yaw:.3f} ({math.degrees(target_yaw):.1f}°)")
+        print(f"   说明: 回正后车头朝向+x，倒车沿-x方向\n")
+
+        # 使用SimpleTrajectoryPlanner规划这段轨迹
+        # 策略：先旋转到0° → 倒车（沿-x方向）
+        waypoints = []
+
+        # 阶段1: 原地旋转回正
+        angle_diff = self._normalize_angle(target_yaw - start_yaw)
+        if abs(angle_diff) > 0.01:
+            print(f"   阶段1: 原地旋转 {math.degrees(angle_diff):.1f}° 回正到0°")
+            waypoints.append((start_x, start_y, start_yaw))  # 起点
+            waypoints.append((start_x, start_y, target_yaw))  # 回正后
+        else:
+            waypoints.append((start_x, start_y, start_yaw))
+
+        # 阶段2: 倒车（沿-x方向，y不变）
+        backward_distance = abs(CORRECTION_BACKWARD_DISTANCE)
+        num_points = int(backward_distance / 0.15) + 1
+        print(f"   阶段2: 倒车 {CORRECTION_BACKWARD_DISTANCE}米（沿-x方向，点间距0.15m, {num_points}个点）")
+
+        for i in range(1, num_points + 1):
+            t = i / num_points
+            x = start_x - CORRECTION_BACKWARD_DISTANCE * t
+            waypoints.append((x, target_y, target_yaw))
+
+        print(f"   ✅ 误差消除轨迹规划完成: 共 {len(waypoints)} 个路径点\n")
+        self.print_all_waypoints(waypoints)
+
+        # 保存waypoints供MQTT完成后更新Odom使用
+        self.correction_trajectory_waypoints = waypoints
+
+        # 发布轨迹（使用倒车参数：orientation=3.14, flag=0）
+        correction_trajectory_id = f"correction_{int(time.time() * 1000)}"
+        self.publish_path(waypoints, correction_trajectory_id, orientation=3.14, flag=0)
+        self.current_trajectory_id = correction_trajectory_id
+        self.waiting_for_completion = True
+
+        print("="*80)
+        print(f"📤 误差消除轨迹已发布")
+        print(f"📋 轨迹ID: {correction_trajectory_id}")
+        print(f"📋 Beta-3参数: orientation=3.14, flag=0（倒车）")
+        print("⏳ 等待MQTT完成信号，然后规划取货轨迹...\n")
 
     def plan_and_publish_complex(self, goal_pose):
         """使用ComplexTrajectoryPlanner规划并发布（前向+后向）"""
@@ -313,8 +400,24 @@ class UnifiedPlannerNode(Node):
 
         # 发布后向轨迹
         backward_trajectory_id = f"pickup_backward_{int(time.time() * 1000)}"
-        self.publish_path(backward_waypoints, backward_trajectory_id, orientation=3.14, flag=1,
-                         container_type="AGV-T300", container_x=goal_x, container_y=goal_y)
+
+        # 如果有托盘信息（MODE_FORK），使用托盘信息
+        if self.pallet_info:
+            container_type = "AGV-T300"  # 默认容器类型
+            container_x = self.pallet_info['x']
+            container_y = self.pallet_info['y']
+            print(f"📦 托盘信息:")
+            print(f"   容器类型: {container_type}")
+            print(f"   容器位置: ({container_x:.3f}, {container_y:.3f})\n")
+
+            # self.publish_path(backward_waypoints, backward_trajectory_id, orientation=3.14, flag=1,
+            #                 container_type=container_type, container_x=container_x, container_y=container_y)
+            # 假设没有托盘信息（目前控制器不支持）
+            self.publish_path(backward_waypoints, backward_trajectory_id, orientation=3.14, flag=0)
+        else:
+            # 没有托盘信息（兼容旧方式）
+            self.publish_path(backward_waypoints, backward_trajectory_id, orientation=3.14, flag=0)
+
         self.current_trajectory_id = backward_trajectory_id
         self.waiting_for_completion = True
 
@@ -441,7 +544,17 @@ class UnifiedPlannerNode(Node):
         if mode == GoToPose.Request.MODE_FORK:
             pallet_x = request.pallet_pose.position.x
             pallet_y = request.pallet_pose.position.y
+            pallet_size = request.pallet_size
             print(f"托盘位置: ({pallet_x:.3f}, {pallet_y:.3f})")
+            print(f"托盘尺寸: ({pallet_size.x:.2f}, {pallet_size.y:.2f}, {pallet_size.z:.2f})")
+
+            # 保存托盘信息供后续倒车轨迹使用
+            self.pallet_info = {
+                'pose': request.pallet_pose,
+                'size': pallet_size,
+                'x': pallet_x,
+                'y': pallet_y
+            }
 
         # 检查是否可以接受新目标
         if self.waiting_for_completion:
@@ -451,27 +564,28 @@ class UnifiedPlannerNode(Node):
             print("="*80)
             return response
 
-        if self.goal_count >= 2:
-            response.arrived = False
-            response.message = "已完成2个目标点，请重启规划器"
-            print("⚠️  拒绝请求：已完成2个目标点")
-            print("="*80)
-            return response
-
         # 将PoseStamped格式转换为内部处理
         goal_pose = target
 
-        # 根据目标点数量选择规划器
-        self.goal_count += 1
-
-        if self.goal_count == 1:
-            print(f"✅ 接受为第1个目标点（观察点）")
+        # 根据mode选择规划器（而不是goal_count）
+        # MODE_NORMAL (0) = 观察点
+        # MODE_FORK (1) = 叉取点
+        if mode == GoToPose.Request.MODE_NORMAL:
+            print(f"✅ 接受为观察点（MODE_NORMAL）")
             print(f"规划策略: SimpleTrajectoryPlanner\n")
             self.plan_and_publish_simple(goal_pose)
-        elif self.goal_count == 2:
-            print(f"✅ 接受为第2个目标点（取货点）")
-            print(f"规划策略: ComplexTrajectoryPlanner\n")
-            self.plan_and_publish_complex(goal_pose)
+            self.goal_count += 1
+
+        elif mode == GoToPose.Request.MODE_FORK:
+            print(f"✅ 接受为叉取点（MODE_FORK）")
+            if ENABLE_CORRECTION_TRAJECTORY:
+                print(f"规划策略: 误差消除轨迹 + ComplexTrajectoryPlanner\n")
+                self.pending_pickup_goal = goal_pose
+                self.plan_and_publish_correction_trajectory()
+            else:
+                print(f"规划策略: ComplexTrajectoryPlanner\n")
+                self.plan_and_publish_complex(goal_pose)
+            self.goal_count += 1
 
         # ===== 等待轨迹完成 =====
         print("="*80)
@@ -561,6 +675,21 @@ class UnifiedPlannerNode(Node):
                     # 设置完成标志，通知GoToPose service
                     self.trajectory_completed = True
 
+                # 如果是误差消除轨迹完成，发布取货轨迹
+                elif "correction" in self.current_trajectory_id:
+                    # TODO: 生产环境有真实Odom时，注释掉下面这行
+                    # 测试环境：将误差消除轨迹终点更新到/Odom，供取货轨迹使用
+                    if hasattr(self, 'correction_trajectory_waypoints'):
+                        self.update_odom_from_trajectory_end(self.correction_trajectory_waypoints)
+
+                    print("⏳ 等待3秒后规划取货轨迹...\n")
+                    time.sleep(3)
+
+                    # 使用之前保存的目标点规划取货轨迹
+                    if self.pending_pickup_goal:
+                        self.plan_and_publish_complex(self.pending_pickup_goal)
+                        self.pending_pickup_goal = None  # 清除已使用的目标点
+
                 # 如果是第2段的前向轨迹完成，发布后向轨迹
                 elif "pickup_forward" in self.current_trajectory_id:
                     # TODO: 生产环境有真实Odom时，注释掉下面这行
@@ -589,6 +718,15 @@ class UnifiedPlannerNode(Node):
         siny_cosp = 2 * (q.w * q.z + q.x * q.y)
         cosy_cosp = 1 - 2 * (q.y * q.y + q.z * q.z)
         return math.atan2(siny_cosp, cosy_cosp)
+
+    @staticmethod
+    def _normalize_angle(angle: float) -> float:
+        """将角度归一化到 [-pi, pi]"""
+        while angle > math.pi:
+            angle -= 2 * math.pi
+        while angle < -math.pi:
+            angle += 2 * math.pi
+        return angle
 
     @staticmethod
     def euler_to_quaternion(roll, pitch, yaw):
@@ -631,7 +769,12 @@ def main():
     print("📋 使用说明：")
     print("  1. 本程序启动后等待目标点")
     print("  2. 【第1个点 - 观察点】使用 SimpleTrajectoryPlanner（前进 + 转弯）")
-    print("  3. 【第2个点 - 取货点】使用 ComplexTrajectoryPlanner（转弯 + 前进 + 转弯 + 倒车）")
+    if ENABLE_CORRECTION_TRAJECTORY:
+        print("  3. 【第2个点 - 取货点】使用 误差消除轨迹 + ComplexTrajectoryPlanner")
+        print(f"     - 步骤1: 回正 + 倒车{CORRECTION_BACKWARD_DISTANCE}米（消除旋转误差）")
+        print("     - 步骤2: 转弯 + 前进 + 转弯 + 倒车（到达取货点）")
+    else:
+        print("  3. 【第2个点 - 取货点】使用 ComplexTrajectoryPlanner（转弯 + 前进 + 转弯 + 倒车）")
     print("="*80)
     print()
     print("⏳ 等待 /Odom 话题数据...")
@@ -658,10 +801,16 @@ def main():
     print("📍 请按顺序发布目标点：")
     print()
     print("第1步 - 发布观察点：")
-    print("  python3 publish_test_goal.py --x 3.0 --y 0.0 --yaw-deg 90")
+    print("  python3 publish_test_goal.py --x 3.0 --y 0.0 --yaw-deg -90")
     print()
-    print("第2步 - 等待第1段轨迹完成后，发布取货点：")
-    print("  python3 publish_test_goal.py --x 4.0 --y 1.0 --yaw-deg-90")
+    if ENABLE_CORRECTION_TRAJECTORY:
+        print("第2步 - 等待第1段轨迹完成后，发布取货点：")
+        print("  python3 publish_test_goal.py --x 4.0 --y 1.0 --yaw-deg 0")
+        print()
+        print(f"💡 启用误差消除：观察点完成后会先回正+倒车{CORRECTION_BACKWARD_DISTANCE}米，再到达取货点")
+    else:
+        print("第2步 - 等待第1段轨迹完成后，发布取货点：")
+        print("  python3 publish_test_goal.py --x 4.0 --y 1.0 --yaw-deg 90")
     print("="*80)
     print()
 
