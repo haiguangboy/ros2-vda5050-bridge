@@ -108,6 +108,11 @@ private:
         double flag;            ///< 分支标志
         std::string action_type;        ///< 动作类型
         std::string container_type;     ///< 容器类型
+        double container_x;      ///< 容器X坐标
+        double container_y;      ///< 容器Y坐标
+        double container_z;      ///< 容器Z坐标
+        double container_theta;  ///< 容器朝向（弧度）
+        double container_width;  ///< 容器宽度（米）
     };
 
     /**

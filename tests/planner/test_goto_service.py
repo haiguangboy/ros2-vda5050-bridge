@@ -62,13 +62,13 @@ class GoToPoseClient(Node):
             # 托盘位置通常与目标点位置一致或稍有偏移
             request.pallet_pose.position.x = x
             request.pallet_pose.position.y = y
-            request.pallet_pose.position.z = 0.0
+            request.pallet_pose.position.z = 1.5
             request.pallet_pose.orientation = self.yaw_to_quaternion(math.radians(yaw_deg))
 
             # 托盘尺寸（示例值）
             # 注意：pallet_size.x 会被用作 container_width（容器宽度）
-            request.pallet_size.x = 1.2  # 宽度（）
-            request.pallet_size.y = 0.8  # 长度 会用作container_width（容器宽度）
+            request.pallet_size.x = 1.2  # 长度（）
+            request.pallet_size.y = 0.7  # 宽度 会用作container_width（容器宽度）
             request.pallet_size.z = 0.15  # 高度
 
             # 计算theta（从yaw_deg转换）
@@ -142,7 +142,7 @@ def main():
         print("="*80)
         print("步骤1: 发送观察点")
         print("="*80)
-        response1 = client.send_goal(x=3.0, y=0.0, yaw_deg=-90, mode=GoToPose.Request.MODE_NORMAL)
+        response1 = client.send_goal(x=3.0, y=0.4, yaw_deg=-92, mode=GoToPose.Request.MODE_NORMAL)
 
         if response1 and response1.arrived:
             print("✅ 观察点已到达！\n")
@@ -160,7 +160,7 @@ def main():
             if ENABLE_CORRECTION_TRAJECTORY:
                 # 启用误差消除：车子会先回正到0°，然后再规划取货轨迹
                 # 所以第2个目标点的yaw设为0°
-                pickup_yaw = 0
+                pickup_yaw = -90
                 print("💡 启用误差消除：车子会先回正+倒车0.6米，然后到达取货点")
             else:
                 # 禁用误差消除：使用原流程，保持与观察点相同的朝向
@@ -168,7 +168,7 @@ def main():
                 print("💡 禁用误差消除：直接从观察点到达取货点")
 
             # 第2个目标点使用MODE_FORK，需要提供托盘信息
-            response2 = client.send_goal(x=4.0, y=1.0, yaw_deg=pickup_yaw, mode=GoToPose.Request.MODE_FORK)
+            response2 = client.send_goal(x=4.2, y=1.10, yaw_deg=pickup_yaw, mode=GoToPose.Request.MODE_FORK)
 
             if response2 and response2.arrived:
                 print("✅ 取货点已到达！\n")

@@ -31,11 +31,41 @@ zhongli_protocol::TrajectoryMessage PathConverter::convert_path_to_trajectory(
     std::vector<zhongli_protocol::TrajectoryPoint> trajectory_points;
     trajectory_points.reserve(ros_path.poses.size());
 
+    // 如果有动作类型，创建 TrajectoryAction
+    std::optional<zhongli_protocol::TrajectoryAction> trajectory_action;
+    if (!beta3_info.action_type.empty() && beta3_info.action_type != "none") {
+        zhongli_protocol::TrajectoryAction action;
+        action.actionType = beta3_info.action_type;
+
+        // 如果有容器类型，添加容器信息
+        if (!beta3_info.container_type.empty()) {
+            action.containerType = beta3_info.container_type;
+
+            // 创建 ContainerPose
+            zhongli_protocol::ContainerPose container_pose;
+            container_pose.x = beta3_info.container_x;
+            container_pose.y = beta3_info.container_y;
+            container_pose.z = beta3_info.container_z;
+            container_pose.theta = beta3_info.container_theta;
+            container_pose.width = beta3_info.container_width;
+
+            action.containerPose = container_pose;
+        }
+
+        trajectory_action = action;
+    }
+
     for (const auto& pose_stamped : ros_path.poses) {
         auto point = convert_pose_to_trajectory_point(pose_stamped);
         // 应用beta-3信息
         point.orientation = beta3_info.orientation;
         point.flag = beta3_info.flag;
+
+        // 如果有动作，添加到轨迹点
+        if (trajectory_action.has_value()) {
+            point.action = trajectory_action;
+        }
+
         trajectory_points.push_back(point);
     }
 
@@ -183,6 +213,11 @@ PathConverter::Beta3Info PathConverter::parse_beta3_info_from_frame_id(const std
     info.flag = 0.0;         // 默认非分支
     info.action_type = "";
     info.container_type = "";
+    info.container_x = 0.0;
+    info.container_y = 0.0;
+    info.container_z = 0.0;
+    info.container_theta = 0.0;
+    info.container_width = 1.2;  // 默认容器宽度1.2米
 
     // 解析格式: "map|action_type|container_type|orientation|flag|container_x|container_y|container_z|container_theta|container_width"
     std::vector<std::string> parts;
@@ -239,15 +274,14 @@ PathConverter::Beta3Info PathConverter::parse_beta3_info_from_frame_id(const std
                 }
             }
 
-            // 如果有扩展的容器位姿信息，可以在这里解析
-            // if (parts.size() >= 10) {
-            //     double container_x = std::stod(parts[5]);
-            //     double container_y = std::stod(parts[6]);
-            //     double container_z = std::stod(parts[7]);
-            //     double container_theta = std::stod(parts[8]);
-            //     double container_width = std::stod(parts[9]);
-            //     // 可以创建动作信息并赋给轨迹点
-            // }
+            // 如果有扩展的容器位姿信息，解析它
+            if (parts.size() >= 10) {
+                info.container_x = std::stod(parts[5]);
+                info.container_y = std::stod(parts[6]);
+                info.container_z = std::stod(parts[7]);
+                info.container_theta = std::stod(parts[8]);
+                info.container_width = std::stod(parts[9]);
+            }
         } catch (const std::exception& e) {
             // 解析失败，使用默认值
             std::cerr << "解析frame_id失败: " << e.what() << "，使用默认值" << std::endl;

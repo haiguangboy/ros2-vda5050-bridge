@@ -249,20 +249,22 @@ class UnifiedPlannerNode(Node):
         print(f"📍 起点（观察点终点）: ({start_x:.3f}, {start_y:.3f}), yaw={start_yaw:.3f} ({math.degrees(start_yaw):.1f}°)")
         print(f"📐 倒车距离: {CORRECTION_BACKWARD_DISTANCE}米\n")
 
-        # 创建中间目标：回正到0° + 倒车
-        # 注意：右手坐标系，向右转90°是-90°，所以这里回正是从-90°到0°
-        target_yaw = 0.0  # 回正到0°
+        # 计算回正后的yaw
+        # 观察点结束后yaw约为-90°（-pi/2 rad），回正需要加上90°（+pi/2 rad）
+        # 例如：start_yaw=-1.588 rad（-91°），回正后 target_yaw = -1.588 + 1.571 ≈ -0.017 rad（约-1°）
+        target_yaw = start_yaw + math.pi / 2  # 加90度（弧度制）
 
-        # 倒车后的位置：回正后车头朝向+x方向，倒车是沿-x方向
-        # 所以x减少CORRECTION_BACKWARD_DISTANCE，y保持不变
-        target_x = start_x - CORRECTION_BACKWARD_DISTANCE
-        target_y = start_y
+        # 倒车后的位置：倒车方向与回正后的yaw相反
+        # 使用三角函数计算: backward方向 = -cos(yaw)*distance, -sin(yaw)*distance
+        # 注意：即使target_yaw=0，实际执行后可能有偏差（如0.12 rad），倒车时x,y都会变化
+        target_x = start_x - CORRECTION_BACKWARD_DISTANCE * math.cos(target_yaw)
+        target_y = start_y - CORRECTION_BACKWARD_DISTANCE * math.sin(target_yaw)
 
         print(f"📍 目标（回正+倒车后）: ({target_x:.3f}, {target_y:.3f}), yaw={target_yaw:.3f} ({math.degrees(target_yaw):.1f}°)")
-        print(f"   说明: 回正后车头朝向+x，倒车沿-x方向\n")
+        print(f"   说明: 从当前yaw回正到0°，倒车时按实际yaw计算（x,y都会变化）\n")
 
         # 使用SimpleTrajectoryPlanner规划这段轨迹
-        # 策略：先旋转到0° → 倒车（沿-x方向）
+        # 策略：先旋转到0° → 倒车（沿yaw相反方向）
         waypoints = []
 
         # 阶段1: 原地旋转回正
@@ -274,15 +276,41 @@ class UnifiedPlannerNode(Node):
         else:
             waypoints.append((start_x, start_y, start_yaw))
 
-        # 阶段2: 倒车（沿-x方向，y不变）
+        # 阶段2: 倒车（沿yaw相反方向，x和y都会变化）
         backward_distance = abs(CORRECTION_BACKWARD_DISTANCE)
-        num_points = int(backward_distance / 0.15) + 1
-        print(f"   阶段2: 倒车 {CORRECTION_BACKWARD_DISTANCE}米（沿-x方向，点间距0.15m, {num_points}个点）")
+        step_size = 0.15
+        num_steps = int(backward_distance / step_size)
+        remaining_distance = backward_distance - num_steps * step_size
 
-        for i in range(1, num_points + 1):
-            t = i / num_points
-            x = start_x - CORRECTION_BACKWARD_DISTANCE * t
-            waypoints.append((x, target_y, target_yaw))
+        print(f"   阶段2: 倒车 {CORRECTION_BACKWARD_DISTANCE}米（yaw保持{target_yaw:.3f}，点间距{step_size}m）")
+
+        # 生成中间点（不包括目标点）
+        for i in range(1, num_steps + 1):
+            dist = i * step_size
+            # 倒车方向与yaw相反：dx = -distance * cos(yaw), dy = -distance * sin(yaw)
+            dx = -dist * math.cos(target_yaw)
+            dy = -dist * math.sin(target_yaw)
+            waypoints.append((start_x + dx, start_y + dy, target_yaw))
+
+        # 计算精确的目标点
+        target_final_x = start_x - CORRECTION_BACKWARD_DISTANCE * math.cos(target_yaw)
+        target_final_y = start_y - CORRECTION_BACKWARD_DISTANCE * math.sin(target_yaw)
+
+        # 处理剩余距离，确保最后一个点是精确目标点
+        if remaining_distance > 0.001:  # 有剩余距离
+            if remaining_distance < 0.05:  # 剩余距离太小，去掉上一个点
+                if len(waypoints) > 1:  # 确保有上一个点可以去掉
+                    waypoints.pop()
+                    print(f"   剩余距离 {remaining_distance:.3f}m < 0.05m，去掉上一个点，合并到目标点")
+            else:
+                # 0.05 <= remaining_distance < 0.15，保留上一个点，再添加目标点
+                print(f"   剩余距离 {remaining_distance:.3f}m，保留上一个点并添加目标点")
+            # 添加精确目标点
+            waypoints.append((target_final_x, target_final_y, target_yaw))
+        else:
+            # 没有剩余距离（distance刚好是0.15的整数倍），最后一个中间点就是目标点
+            # 不需要再添加重复点
+            print(f"   距离刚好是{step_size}m的整数倍，最后一个点已是目标点")
 
         print(f"   ✅ 误差消除轨迹规划完成: 共 {len(waypoints)} 个路径点\n")
         self.print_all_waypoints(waypoints)
@@ -408,7 +436,7 @@ class UnifiedPlannerNode(Node):
             container_y = self.pallet_info['y']
             container_z = self.pallet_info['pose'].position.z  # 托盘z坐标
             container_theta = self.quaternion_to_yaw(self.pallet_info['pose'].orientation)  # 托盘朝向
-            container_width = self.pallet_info['size'].x  # 使用托盘尺寸的x作为宽度
+            container_width = self.pallet_info['size'].y  # 使用托盘尺寸的y作为宽度
 
             print(f"📦 ContainerPose:")
             print(f"   x: {container_x:.3f}")
