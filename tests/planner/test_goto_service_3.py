@@ -153,7 +153,7 @@ def main():
             print("="*80)
             print("步骤2: 发送观察点2")
             print("="*80)
-            response2 = client.send_goal(x=3.0, y=-0.1, yaw_deg=-90, mode=GoToPose.Request.MODE_NORMAL)
+            response2 = client.send_goal(x=3.0, y=0.0, yaw_deg=-90, mode=GoToPose.Request.MODE_NORMAL)
 
             if response2 and response2.arrived:
                 print("✅ 观察点2已到达！\n")
@@ -178,7 +178,7 @@ def main():
                     print("💡 禁用误差消除：直接从观察点2到达取货点")
 
                 # 第3个目标点使用MODE_FORK，需要提供托盘信息
-                response3 = client.send_goal(x=4.0, y=1.0, yaw_deg=pickup_yaw, mode=GoToPose.Request.MODE_FORK)
+                response3 = client.send_goal(x=4.0, y=-1.0, yaw_deg=pickup_yaw, mode=GoToPose.Request.MODE_FORK)
 
                 if response3 and response3.arrived:
                     print("✅ 取货点已到达！\n")

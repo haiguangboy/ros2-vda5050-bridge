@@ -34,14 +34,30 @@ MQTT_BROKER = "192.168.1.102" #localhost for local test  192.168.1.102
 MQTT_PORT = 1883
 ROBOT_ID = "robot-001"
 
-# 误差消除轨迹配置
+# ==================== 环境配置 ====================
+# 测试环境 vs 生产环境
+TEST_MODE = False  # True=测试环境（模拟Odom更新），False=生产环境（使用真实Odom）
+
+# ==================== 轨迹开关配置 ====================
+# 观察点轨迹配置
+ENABLE_OBSERVATION_TRAJECTORY = True  # 是否启用观察点轨迹（SimpleTrajectoryPlanner）
+
+# 取货轨迹配置
+ENABLE_PICKUP_TRAJECTORY = True  # 是否启用取货轨迹（ComplexTrajectoryPlanner）
 ENABLE_CORRECTION_TRAJECTORY = True  # 是否启用误差消除轨迹（观察点完成后回正+倒车）
 CORRECTION_BACKWARD_DISTANCE = 0.6   # 误差消除轨迹的倒车距离（米）
+
+# 卸货轨迹配置
+ENABLE_UNLOAD_TRAJECTORY = True  # 是否启用卸货轨迹（叉取完成后返回主干道并送到卸货点）
+MAIN_ROAD_Y = 0.0  # 主干道的y坐标（米）
 
 # 默认位置（Odom超时时使用）
 DEFAULT_X = 0.0
 DEFAULT_Y = 0.0
 DEFAULT_YAW = 0.0
+
+# 等待的时间
+WAIT_TIME = 0.1
 
 
 # ==================== 统一规划器节点 ====================
@@ -77,7 +93,14 @@ class UnifiedPlannerNode(Node):
         self.waiting_for_completion = False
         self.trajectory_completed = False  # 轨迹是否完成的标志
         self.pending_pickup_goal = None  # 暂存第二个目标点（等待误差消除轨迹完成后使用）
+        self.pending_unload_goal = None  # 暂存卸货目标点
         self.pallet_info = None  # 托盘信息（mode=FORK时使用）
+        self.last_mode = None  # 记录上一次的模式，用于判断是否触发卸货轨迹
+
+        # 卸货轨迹的waypoints（用于测试环境更新Odom）
+        self.unload_stage1_waypoints = None  # 倒车回主干道
+        self.unload_stage2_waypoints = None  # 右转90° + 沿主干道前进
+        self.unload_stage3_waypoints = None  # 右转90° + 倒车到卸货点
 
         # ROS2发布器（用于更新Odom）
         self.odom_publisher = self.create_publisher(Odometry, ODOM_TOPIC, 10)
@@ -372,6 +395,9 @@ class UnifiedPlannerNode(Node):
         # 规划后向轨迹
         backward_waypoints = self.complex_planner.plan_backward(intermediate_pose, backward_distance)
 
+        # 保存waypoints供MQTT完成后更新Odom使用
+        self.backward_trajectory_waypoints = backward_waypoints
+
         print(f"✅ 后向轨迹生成完成，共 {len(backward_waypoints)} 个路径点\n")
         self.print_all_waypoints(backward_waypoints)
 
@@ -394,11 +420,12 @@ class UnifiedPlannerNode(Node):
             print(f"   theta: {container_theta:.3f}")
             print(f"   width: {container_width:.2f}")
             print(f"   container_type: {container_type}\n")
+            print(f"   action_type: pub_load_params\n")
 
             self.publish_path(
                 backward_waypoints, backward_trajectory_id,
                 orientation=3.14, flag=1,
-                action_type="ground_pick",  # 地面取货动作
+                action_type="pub_load_params",  # 地面取货动作
                 container_type=container_type,
                 container_x=container_x,
                 container_y=container_y,
@@ -416,6 +443,181 @@ class UnifiedPlannerNode(Node):
         print("="*80)
         print(f"📤 第2段轨迹（后向）已发布")
         print(f"📋 轨迹ID: {backward_trajectory_id}")
+        print("⏳ 等待MQTT完成信号...\n")
+
+    def plan_and_publish_unload_trajectory(self):
+        """
+        规划并发布卸货轨迹 - 第1段：倒车回主干道
+
+        从叉取点出发，倒车返回主干道（y=0）
+        """
+        print("\n" + "="*80)
+        print("🚛 规划卸货轨迹 - 第1段：倒车回主干道")
+        print("="*80)
+
+        # 从/Odom读取当前位置（叉取点）
+        start_pose = self.current_odom.pose.pose
+        start_x = start_pose.position.x
+        start_y = start_pose.position.y
+        start_yaw = self.quaternion_to_yaw(start_pose.orientation)
+
+        # 获取卸货目标点
+        goal_pose = self.pending_unload_goal
+        goal_x = goal_pose.position.x
+        goal_y = goal_pose.position.y
+        goal_yaw = self.quaternion_to_yaw(goal_pose.orientation)
+
+        print(f"📍 当前位置（叉取点）: ({start_x:.3f}, {start_y:.3f}), yaw={start_yaw:.3f} ({math.degrees(start_yaw):.1f}°)")
+        print(f"📍 最终目标（卸货点）: ({goal_x:.3f}, {goal_y:.3f}), yaw={goal_yaw:.3f} ({math.degrees(goal_yaw):.1f}°)")
+        print(f"📍 主干道y坐标: {MAIN_ROAD_Y:.3f}\n")
+
+        # 计算前进距离
+        forward_distance = abs(MAIN_ROAD_Y - start_y)
+        print(f"📐 向前行驶距离: {forward_distance:.3f}米")
+        print(f"   起点: ({start_x:.3f}, {start_y:.3f})")
+        print(f"   终点: ({start_x:.3f}, {MAIN_ROAD_Y:.3f})")
+        print(f"   车头朝向: yaw={start_yaw:.3f} ({math.degrees(start_yaw):.1f}°)\n")
+
+        # 使用ComplexTrajectoryPlanner的plan_forward_with_turns方法生成前进轨迹
+        # 参数：不转弯（0）、前进、不转弯（0）
+        stage1_waypoints = self.complex_planner.plan_forward_with_turns(
+            start_pose,
+            first_turn_angle=0,  # 不转弯
+            forward_distance=forward_distance,
+            second_turn_angle=0  # 不转弯
+        )
+        self.unload_stage1_waypoints = stage1_waypoints
+
+        print(f"✅ 第1段轨迹生成完成，共 {len(stage1_waypoints)} 个路径点")
+        self.print_all_waypoints(stage1_waypoints)
+
+        # 发布第1段轨迹（向前直行模式）
+        stage1_id = f"unload_stage1_{int(time.time() * 1000)}"
+        self.publish_path(stage1_waypoints, stage1_id, orientation=0.0, flag=0)
+        self.current_trajectory_id = stage1_id
+        self.waiting_for_completion = True
+
+        print("="*80)
+        print(f"📤 卸货第1段轨迹已发布（向前行驶回主干道）")
+        print(f"📋 轨迹ID: {stage1_id}")
+        print("⏳ 等待MQTT完成信号...\n")
+
+    def publish_unload_stage2(self):
+        """
+        发布卸货轨迹第2段：右转90° + 沿主干道前进
+
+        从主干道（段1终点）右转90°，然后沿-x方向（yaw=π）行驶到目标x坐标
+        """
+        print("\n" + "="*80)
+        print("🚛 规划卸货轨迹 - 第2段：右转 + 沿主干道前进")
+        print("="*80)
+
+        # 从/Odom读取段1完成后的位置
+        current_pose = self.current_odom.pose.pose
+        current_x = current_pose.position.x
+        current_y = current_pose.position.y
+        current_yaw = self.quaternion_to_yaw(current_pose.orientation)
+
+        print(f"📍 当前位置: ({current_x:.3f}, {current_y:.3f}), yaw={current_yaw:.3f} ({math.degrees(current_yaw):.1f}°)")
+
+        # 获取目标x坐标（卸货点的x）
+        goal_x = self.pending_unload_goal.position.x
+        forward_distance = abs(goal_x - current_x)
+
+        print(f"📐 右转90° + 沿主干道前进 {forward_distance:.3f}米")
+        print(f"   起点x: {current_x:.3f} → 终点x: {goal_x:.3f}\n")
+
+        # 使用ComplexTrajectoryPlanner的plan_forward_with_turns方法
+        # 参数：右转90°（+π/2）、前进、不转弯（0）
+        stage2_waypoints = self.complex_planner.plan_forward_with_turns(
+            current_pose,
+            first_turn_angle=math.pi / 2,  # 右转90°
+            forward_distance=forward_distance,
+            second_turn_angle=0  # 不需要第二次转弯
+        )
+
+        self.unload_stage2_waypoints = stage2_waypoints
+
+        print(f"✅ 第2段轨迹生成完成，共 {len(stage2_waypoints)} 个路径点")
+        self.print_all_waypoints(stage2_waypoints)
+
+        # 发布第2段轨迹
+        stage2_id = f"unload_stage2_{int(time.time() * 1000)}"
+        self.publish_path(stage2_waypoints, stage2_id, orientation=0.0, flag=0)
+        self.current_trajectory_id = stage2_id
+        self.waiting_for_completion = True
+
+        print("="*80)
+        print(f"📤 卸货第2段轨迹已发布（右转 + 沿主干道前进）")
+        print(f"📋 轨迹ID: {stage2_id}")
+        print("⏳ 等待MQTT完成信号...\n")
+
+    def publish_unload_stage3(self):
+        """
+        发布卸货轨迹第3段：右转90° + 倒车到卸货点
+
+        从主干道右转90°，然后倒车到卸货点（沿+y方向倒车）
+        """
+        print("\n" + "="*80)
+        print("🚛 规划卸货轨迹 - 第3段：左转 + 倒车到卸货点")
+        print("="*80)
+
+        # 从/Odom读取段2完成后的位置
+        current_pose = self.current_odom.pose.pose
+        current_x = current_pose.position.x
+        current_y = current_pose.position.y
+        current_yaw = self.quaternion_to_yaw(current_pose.orientation)
+
+        print(f"📍 当前位置: ({current_x:.3f}, {current_y:.3f}), yaw={current_yaw:.3f} ({math.degrees(current_yaw):.1f}°)")
+
+        # 向右旋转90°：yaw + π/2，归一化到[-π, π]
+        intermediate_yaw = self._normalize_angle(current_yaw + math.pi / 2)
+        print(f"📐 左转90°后yaw: {intermediate_yaw:.3f} ({math.degrees(intermediate_yaw):.1f}°)")
+
+        # 获取卸货点的y坐标
+        goal_y = self.pending_unload_goal.position.y
+        goal_yaw = self.quaternion_to_yaw(self.pending_unload_goal.orientation)
+        backward_distance = abs(goal_y - current_y)
+
+        print(f"📐 倒车距离: {backward_distance:.3f}米")
+        print(f"   起点y: {current_y:.3f} → 终点y: {goal_y:.3f}")
+        print(f"   终点yaw: {goal_yaw:.3f} ({math.degrees(goal_yaw):.1f}°)\n")
+
+        # 生成第3段轨迹：旋转 + 倒车
+        waypoints = []
+
+        # 1. 原地左转90°
+        waypoints.append((current_x, current_y, current_yaw))
+        waypoints.append((current_x, current_y, intermediate_yaw))
+
+        # 2. 倒车到卸货点
+        # 使用ComplexTrajectoryPlanner的plan_backward方法
+        temp_pose = Pose()
+        temp_pose.position.x = current_x
+        temp_pose.position.y = current_y
+        temp_pose.position.z = 0.0
+        temp_pose.orientation = self.euler_to_quaternion(0, 0, intermediate_yaw)
+
+        backward_waypoints = self.complex_planner.plan_backward(temp_pose, backward_distance)
+        waypoints.extend(backward_waypoints)
+
+        self.unload_stage3_waypoints = waypoints
+
+        print(f"✅ 第3段轨迹生成完成，共 {len(waypoints)} 个路径点")
+        print(f"   - 左转: 2个点")
+        print(f"   - 倒车: {len(backward_waypoints)}个点")
+        self.print_all_waypoints(waypoints)
+
+        # 发布第3段轨迹（倒车模式 + 卸货动作）
+        stage3_id = f"unload_stage3_{int(time.time() * 1000)}"
+        self.publish_path(waypoints, stage3_id, orientation=3.14, flag=1,
+                         action_type="pub_unload_params", container_type="AGV-T300")
+        self.current_trajectory_id = stage3_id
+        self.waiting_for_completion = True
+
+        print("="*80)
+        print(f"📤 卸货第3段轨迹已发布（右转 + 倒车到卸货点）")
+        print(f"📋 轨迹ID: {stage3_id}")
         print("⏳ 等待MQTT完成信号...\n")
 
     def publish_path(self, waypoints, trajectory_id, orientation=0.0, flag=0,
@@ -492,8 +694,10 @@ class UnifiedPlannerNode(Node):
 
     def update_odom_from_trajectory_end(self, waypoints):
         """
-        将轨迹终点更新到/Odom话题
-        用于测试环境下模拟位置更新（生产环境有真实Odom数据时可注释掉）
+        将轨迹终点更新到/Odom话题（仅测试模式）
+
+        测试环境：用于模拟机器人位置更新，下一段轨迹会从这个位置开始规划
+        生产环境：此方法不会被调用（TEST_MODE=False），使用真实/Odom话题数据
         """
         end_x, end_y, end_yaw = waypoints[-1]
 
@@ -583,23 +787,58 @@ class UnifiedPlannerNode(Node):
         # 将PoseStamped格式转换为内部处理
         goal_pose = target
 
-        # 根据mode选择规划器（而不是goal_count）
-        # MODE_NORMAL (0) = 观察点
+        # 根据mode选择规划器
+        # MODE_NORMAL (0) = 观察点 或 卸货点
         # MODE_FORK (1) = 叉取点
-        if mode == GoToPose.Request.MODE_NORMAL:
-            print(f"✅ 接受为观察点（MODE_NORMAL）")
-            print(f"规划策略: SimpleTrajectoryPlanner\n")
-            self.plan_and_publish_simple(goal_pose)
 
-        elif mode == GoToPose.Request.MODE_FORK:
-            print(f"✅ 接受为叉取点（MODE_FORK）")
-            if ENABLE_CORRECTION_TRAJECTORY:
-                print(f"规划策略: 误差消除轨迹 + ComplexTrajectoryPlanner\n")
-                self.pending_pickup_goal = goal_pose
-                self.plan_and_publish_correction_trajectory()
+        # 添加调试日志
+        print(f"🔍 调试信息:")
+        print(f"   当前模式: {mode} ({'NORMAL' if mode == 0 else 'FORK'})")
+        print(f"   上一次模式: {getattr(self, 'last_mode', None)}")
+        print(f"   卸货轨迹启用: {ENABLE_UNLOAD_TRAJECTORY}")
+
+        # 先检查是否是卸货场景（MODE_NORMAL + 上次是MODE_FORK）
+        if mode == GoToPose.Request.MODE_NORMAL and hasattr(self, 'last_mode') and self.last_mode == GoToPose.Request.MODE_FORK:
+            if ENABLE_UNLOAD_TRAJECTORY:
+                print(f"✅ 检测到取货后的目标点，触发卸货轨迹（3段）")
+                print(f"规划策略: 卸货轨迹\n")
+                self.pending_unload_goal = goal_pose
+                self.plan_and_publish_unload_trajectory()
             else:
-                print(f"规划策略: ComplexTrajectoryPlanner\n")
-                self.plan_and_publish_complex(goal_pose)
+                # 禁用卸货轨迹时，按普通点处理
+                print(f"✅ 接受为目标点（MODE_NORMAL）")
+                print(f"规划策略: SimpleTrajectoryPlanner\n")
+                self.pending_goal = goal_pose
+                self.plan_and_publish_simple(goal_pose)
+
+        # 普通观察点
+        elif mode == GoToPose.Request.MODE_NORMAL:
+            if ENABLE_OBSERVATION_TRAJECTORY:
+                print(f"✅ 接受为观察点（MODE_NORMAL）")
+                print(f"规划策略: SimpleTrajectoryPlanner\n")
+                self.plan_and_publish_simple(goal_pose)
+            else:
+                print(f"⚠️ 观察点轨迹未启用（ENABLE_OBSERVATION_TRAJECTORY=False）")
+                response.arrived = False
+                response.message = "观察点轨迹未启用"
+                return response
+
+        # 叉取点
+        elif mode == GoToPose.Request.MODE_FORK:
+            if ENABLE_PICKUP_TRAJECTORY:
+                print(f"✅ 接受为叉取点（MODE_FORK）")
+                if ENABLE_CORRECTION_TRAJECTORY:
+                    print(f"规划策略: 误差消除轨迹 + ComplexTrajectoryPlanner\n")
+                    self.pending_pickup_goal = goal_pose
+                    self.plan_and_publish_correction_trajectory()
+                else:
+                    print(f"规划策略: ComplexTrajectoryPlanner\n")
+                    self.plan_and_publish_complex(goal_pose)
+            else:
+                print(f"⚠️ 取货轨迹未启用（ENABLE_PICKUP_TRAJECTORY=False）")
+                response.arrived = False
+                response.message = "取货轨迹未启用"
+                return response
 
         # ===== 等待轨迹完成 =====
         print("="*80)
@@ -626,10 +865,24 @@ class UnifiedPlannerNode(Node):
                 print("="*80 + "\n")
 
                 response.arrived = True
-                mode_name = "观察点" if mode == GoToPose.Request.MODE_NORMAL else "取货点"
+                # 判断模式名称
+                if mode == GoToPose.Request.MODE_NORMAL:
+                    # 如果是取货后的目标点，则为卸货点
+                    if hasattr(self, 'last_mode') and self.last_mode == GoToPose.Request.MODE_FORK and ENABLE_UNLOAD_TRAJECTORY:
+                        mode_name = "卸货点"
+                    else:
+                        mode_name = "观察点"
+                elif mode == GoToPose.Request.MODE_FORK:
+                    mode_name = "取货点"
+                else:
+                    mode_name = "未知模式"
+
                 response.message = f"{mode_name}已到达"
                 print(f"📤 返回响应: arrived=True, message={response.message}")
                 print("="*80 + "\n")
+
+                # 保存当前模式供下次使用
+                self.last_mode = mode
                 return response
 
         # 超时处理
@@ -638,7 +891,17 @@ class UnifiedPlannerNode(Node):
         print("="*80 + "\n")
 
         response.arrived = False
-        mode_name = "观察点" if mode == GoToPose.Request.MODE_NORMAL else "取货点"
+        # 判断模式名称
+        if mode == GoToPose.Request.MODE_NORMAL:
+            # 如果是取货后的目标点，则为卸货点
+            if hasattr(self, 'last_mode') and self.last_mode == GoToPose.Request.MODE_FORK and ENABLE_UNLOAD_TRAJECTORY:
+                mode_name = "卸货点"
+            else:
+                mode_name = "观察点"
+        elif mode == GoToPose.Request.MODE_FORK:
+            mode_name = "取货点"
+        else:
+            mode_name = "未知模式"
         response.message = f"{mode_name}执行超时"
         print(f"📤 返回响应: arrived=False, message={response.message}")
         print("="*80 + "\n")
@@ -683,9 +946,8 @@ class UnifiedPlannerNode(Node):
                 # 根据本地轨迹ID判断是哪一段轨迹
                 # 如果是第1段轨迹（观察点）完成
                 if "observation" in self.current_trajectory_id:
-                    # TODO: 生产环境有真实Odom时，注释掉下面这行
                     # 测试环境：将第1段轨迹终点更新到/Odom，供第2段使用
-                    if hasattr(self, 'first_trajectory_waypoints'):
+                    if TEST_MODE and hasattr(self, 'first_trajectory_waypoints'):
                         self.update_odom_from_trajectory_end(self.first_trajectory_waypoints)
 
                     # 设置完成标志，通知GoToPose service
@@ -693,13 +955,12 @@ class UnifiedPlannerNode(Node):
 
                 # 如果是误差消除轨迹完成，发布取货轨迹
                 elif "correction" in self.current_trajectory_id:
-                    # TODO: 生产环境有真实Odom时，注释掉下面这行
                     # 测试环境：将误差消除轨迹终点更新到/Odom，供取货轨迹使用
-                    if hasattr(self, 'correction_trajectory_waypoints'):
+                    if TEST_MODE and hasattr(self, 'correction_trajectory_waypoints'):
                         self.update_odom_from_trajectory_end(self.correction_trajectory_waypoints)
 
-                    print("⏳ 等待3秒后规划取货轨迹...\n")
-                    time.sleep(3)
+                    print("⏳ 等待0.1秒后规划取货轨迹...\n")
+                    time.sleep(WAIT_TIME)
 
                     # 使用之前保存的目标点规划取货轨迹
                     if self.pending_pickup_goal:
@@ -708,22 +969,62 @@ class UnifiedPlannerNode(Node):
 
                 # 如果是第2段的前向轨迹完成，发布后向轨迹
                 elif "pickup_forward" in self.current_trajectory_id:
-                    # TODO: 生产环境有真实Odom时，注释掉下面这行
                     # 测试环境：将前向轨迹终点更新到/Odom，供倒车使用
-                    if hasattr(self, 'forward_trajectory_waypoints'):
+                    if TEST_MODE and hasattr(self, 'forward_trajectory_waypoints'):
                         self.update_odom_from_trajectory_end(self.forward_trajectory_waypoints)
 
-                    # print("⏳ 等待秒后发布倒车轨迹...\n")
-                    # time.sleep(3)
-                    # self.publish_backward_trajectory()
+                    print("⏳ 等待0.1秒后发布倒车轨迹...\n")
+                    time.sleep(WAIT_TIME)
+                    self.publish_backward_trajectory()
 
                 elif "pickup_backward" in self.current_trajectory_id:
-                    print("🎉 所有轨迹已完成！")
+                    print("🎉 取货轨迹已完成！")
                     print("✅ 观察点和取货点任务完成")
+
+                    # 测试环境：将倒车轨迹终点更新到/Odom
+                    if TEST_MODE and hasattr(self, 'backward_trajectory_waypoints'):
+                        self.update_odom_from_trajectory_end(self.backward_trajectory_waypoints)
+
                     print("💡 程序将继续监听，按Ctrl+C退出\n")
 
                     # 设置完成标志，通知GoToPose service
                     self.trajectory_completed = True
+
+                # ===== 卸货轨迹的3段处理 =====
+                elif "unload_stage1" in self.current_trajectory_id:
+                    print("✅ 卸货第1段（向前行驶回主干道）已完成")
+
+                    # 测试环境：模拟Odom更新
+                    if TEST_MODE and hasattr(self, 'unload_stage1_waypoints'):
+                        self.update_odom_from_trajectory_end(self.unload_stage1_waypoints)
+
+                    print("⏳ 等待0.1秒后发布第2段...\n")
+                    time.sleep(WAIT_TIME)
+                    self.publish_unload_stage2()
+
+                elif "unload_stage2" in self.current_trajectory_id:
+                    print("✅ 卸货第2段（右转 + 沿主干道前进）已完成")
+
+                    # 测试环境：模拟Odom更新
+                    if TEST_MODE and hasattr(self, 'unload_stage2_waypoints'):
+                        self.update_odom_from_trajectory_end(self.unload_stage2_waypoints)
+
+                    print("⏳ 等待0.1秒后发布第3段...\n")
+                    time.sleep(WAIT_TIME)
+                    self.publish_unload_stage3()
+
+                elif "unload_stage3" in self.current_trajectory_id:
+                    print("🎉 卸货轨迹全部完成！")
+                    print("✅ 货物已送达卸货点")
+                    print("💡 程序将继续监听，按Ctrl+C退出\n")
+
+                    # 测试环境：模拟Odom更新
+                    if TEST_MODE and hasattr(self, 'unload_stage3_waypoints'):
+                        self.update_odom_from_trajectory_end(self.unload_stage3_waypoints)
+
+                    # 设置完成标志，通知GoToPose service
+                    self.trajectory_completed = True
+                    self.pending_unload_goal = None  # 清除已使用的目标点
 
         except Exception as e:
             print(f"❌ MQTT消息解析错误: {e}")
@@ -782,15 +1083,41 @@ class UnifiedPlannerNode(Node):
 def main():
     print("🚀 统一轨迹规划器")
     print("="*80)
+    print("📋 环境配置：")
+    if TEST_MODE:
+        print("  运行模式: 🧪 测试模式（模拟Odom更新）")
+        print("  说明: 轨迹完成后会自动更新/Odom到轨迹终点")
+    else:
+        print("  运行模式: 🏭 生产模式（使用真实Odom）")
+        print("  说明: 从真实/Odom话题订阅机器人位置")
+    print("="*80)
+    print()
+    print("📋 轨迹开关配置：")
+    print(f"  观察点轨迹: {'✅ 启用' if ENABLE_OBSERVATION_TRAJECTORY else '❌ 禁用'}")
+    print(f"  取货轨迹:   {'✅ 启用' if ENABLE_PICKUP_TRAJECTORY else '❌ 禁用'}")
+    if ENABLE_PICKUP_TRAJECTORY:
+        print(f"    ├─ 误差消除: {'✅ 启用' if ENABLE_CORRECTION_TRAJECTORY else '❌ 禁用'}")
+        if ENABLE_CORRECTION_TRAJECTORY:
+            print(f"    └─ 倒车距离: {CORRECTION_BACKWARD_DISTANCE}米")
+    print(f"  卸货轨迹:   {'✅ 启用' if ENABLE_UNLOAD_TRAJECTORY else '❌ 禁用'}")
+    if ENABLE_UNLOAD_TRAJECTORY:
+        print(f"    └─ 主干道y: {MAIN_ROAD_Y}米")
+    print("="*80)
+    print()
     print("📋 使用说明：")
     print("  1. 本程序启动后等待目标点")
-    print("  2. 【第1个点 - 观察点】使用 SimpleTrajectoryPlanner（前进 + 转弯）")
+    print("  2. 【观察点】MODE_NORMAL - SimpleTrajectoryPlanner（前进 + 转弯）")
+    print("  3. 【取货点】MODE_FORK - ComplexTrajectoryPlanner")
     if ENABLE_CORRECTION_TRAJECTORY:
-        print("  3. 【第2个点 - 取货点】使用 误差消除轨迹 + ComplexTrajectoryPlanner")
         print(f"     - 步骤1: 回正 + 倒车{CORRECTION_BACKWARD_DISTANCE}米（消除旋转误差）")
         print("     - 步骤2: 转弯 + 前进 + 转弯 + 倒车（到达取货点）")
     else:
-        print("  3. 【第2个点 - 取货点】使用 ComplexTrajectoryPlanner（转弯 + 前进 + 转弯 + 倒车）")
+        print("     - 直接规划: 转弯 + 前进 + 转弯 + 倒车")
+    if ENABLE_UNLOAD_TRAJECTORY:
+        print("  4. 【卸货点】MODE_NORMAL（取货后）- 3段卸货轨迹")
+        print("     - 第1段: 向前行驶回主干道")
+        print("     - 第2段: 右转 + 沿主干道前进")
+        print("     - 第3段: 左转 + 倒车到卸货点")
     print("="*80)
     print()
     print("⏳ 等待 /Odom 话题数据...")
@@ -804,7 +1131,7 @@ def main():
         return
 
     # 等待Odom数据
-    timeout = 5.0
+    timeout = 2.0
     start_time = time.time()
     while not node.odom_received and (time.time() - start_time) < timeout:
         rclpy.spin_once(node, timeout_sec=0.1)
@@ -817,13 +1144,18 @@ def main():
     print("📍 测试方法：")
     print()
     print("使用 GoToPose Service（推荐）：")
-    print("  python3 test_goto_service.py")
+    print("  # 测试观察点")
+    print("  python3 test_goto_service.py         # 观察点 + 取货点")
     print()
-    print("说明：")
-    print("  - 第1个目标点（观察点）：MODE_NORMAL")
-    print("  - 第2个目标点（取货点）：MODE_FORK，需提供托盘信息")
-    if ENABLE_CORRECTION_TRAJECTORY:
-        print(f"  - 启用误差消除：观察点完成后会先回正+倒车{CORRECTION_BACKWARD_DISTANCE}米")
+    print("  # 测试完整流程")
+    print("  python3 test_unload.py               # 观察点 + 取货点 + 卸货点")
+    print()
+    print("💡 提示：")
+    print("  - 可以通过修改配置文件顶部的开关来启用/禁用特定轨迹")
+    print("  - ENABLE_OBSERVATION_TRAJECTORY: 观察点轨迹")
+    print("  - ENABLE_PICKUP_TRAJECTORY: 取货轨迹")
+    print("  - ENABLE_CORRECTION_TRAJECTORY: 误差消除轨迹（取货轨迹的子选项）")
+    print("  - ENABLE_UNLOAD_TRAJECTORY: 卸货轨迹")
     print("="*80)
     print()
 
