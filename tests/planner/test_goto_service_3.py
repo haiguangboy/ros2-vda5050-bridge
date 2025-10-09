@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-测试GoToPose Service
-模拟调度器调用/go_to_pose服务发送目标点
+测试GoToPose Service - 3个目标点场景
+发送顺序：观察点1 → 观察点2 → 取货点
 
 注意：
 - 如果unified_planner_workflow.py启用了误差消除轨迹（ENABLE_CORRECTION_TRAJECTORY=True）
-  第2个目标点的yaw应该设为0°（因为车子会先回正）
-- 如果禁用了误差消除轨迹，第2个目标点的yaw应该与第1个点保持一致（-90°）
+  取货点的yaw应该设为0°（因为车子会先回正）
+- 如果禁用了误差消除轨迹，取货点的yaw应该与最后一个观察点保持一致
 """
 
 import rclpy
@@ -66,9 +66,9 @@ class GoToPoseClient(Node):
             request.pallet_pose.orientation = self.yaw_to_quaternion(math.radians(yaw_deg))
 
             # 托盘尺寸（示例值）
-            # 注意：pallet_size.x 会被用作 container_width（容器宽度）
-            request.pallet_size.x = 1.2  # 长度（）
-            request.pallet_size.y = 0.7  # 宽度 会用作container_width（容器宽度）
+            # 注意：pallet_size.y 会被用作 container_width（容器宽度）
+            request.pallet_size.x = 1.2  # 长度
+            request.pallet_size.y = 0.7  # 宽度（会用作container_width）
             request.pallet_size.z = 0.15  # 高度
 
             # 计算theta（从yaw_deg转换）
@@ -115,9 +115,9 @@ class GoToPoseClient(Node):
 
 
 def main():
-    print("🧪 GoToPose Service 测试")
+    print("🧪 GoToPose Service 测试 - 3个目标点")
     print("="*80)
-    print("模拟调度器使用GoToPose.srv格式发送目标点")
+    print("模拟调度器发送：观察点1 → 观察点2 → 取货点")
     print()
     print("📝 说明：")
     print("  - GoToPose service是同步调用，会阻塞直到轨迹执行完成")
@@ -126,9 +126,7 @@ def main():
     print()
     print(f"⚙️  配置：误差消除轨迹 {'启用' if ENABLE_CORRECTION_TRAJECTORY else '禁用'}")
     if ENABLE_CORRECTION_TRAJECTORY:
-        print("     第2个目标点yaw将设为0°（车子会先回正）")
-    else:
-        print("     第2个目标点yaw将设为-90°（与第1个点保持一致）")
+        print("     取货点前会先回正+倒车0.6米（消除旋转误差）")
     print()
     print("⚠️  注意：service调用会等待轨迹完成才返回，可能需要较长时间！")
     print("="*80)
@@ -138,45 +136,59 @@ def main():
     client = GoToPoseClient()
 
     try:
-        # 发送第1个目标点（观察点）
+        # 发送第1个目标点（观察点1）
         print("="*80)
-        print("步骤1: 发送观察点")
+        print("步骤1: 发送观察点1")
         print("="*80)
-        response1 = client.send_goal(x=3.0, y=0.4, yaw_deg=-92, mode=GoToPose.Request.MODE_NORMAL)
+        response1 = client.send_goal(x=2.0, y=0.0, yaw_deg=-90, mode=GoToPose.Request.MODE_NORMAL)
 
         if response1 and response1.arrived:
-            print("✅ 观察点已到达！\n")
+            print("✅ 观察点1已到达！\n")
 
             # 等待用户确认后再发送第二个目标点
-            input("👉 按Enter键继续发送第2个目标点（取货点）...")
+            input("👉 按Enter键继续发送第2个目标点（观察点2）...")
             print()
 
-            # 发送第2个目标点（取货点）
+            # 发送第2个目标点（观察点2）
             print("="*80)
-            print("步骤2: 发送取货点")
+            print("步骤2: 发送观察点2")
             print("="*80)
-
-            # 根据是否启用误差消除轨迹，设置不同的yaw角度
-            if ENABLE_CORRECTION_TRAJECTORY:
-                # 启用误差消除：车子会先回正到0°，然后再规划取货轨迹
-                # 所以第2个目标点的yaw设为0°
-                pickup_yaw = 90
-                print("💡 启用误差消除：车子会先回正+倒车0.6米，然后到达取货点")
-            else:
-                # 禁用误差消除：使用原流程，保持与观察点相同的朝向
-                pickup_yaw = 90
-                print("💡 禁用误差消除：直接从观察点到达取货点")
-
-            # 第2个目标点使用MODE_FORK，需要提供托盘信息
-            response2 = client.send_goal(x=4.2, y=1.10, yaw_deg=pickup_yaw, mode=GoToPose.Request.MODE_FORK)
+            response2 = client.send_goal(x=3.0, y=-0.1, yaw_deg=-90, mode=GoToPose.Request.MODE_NORMAL)
 
             if response2 and response2.arrived:
-                print("✅ 取货点已到达！\n")
-                print("🎉 所有任务完成！")
+                print("✅ 观察点2已到达！\n")
+
+                # 等待用户确认后再发送第三个目标点
+                input("👉 按Enter键继续发送第3个目标点（取货点）...")
+                print()
+
+                # 发送第3个目标点（取货点）
+                print("="*80)
+                print("步骤3: 发送取货点")
+                print("="*80)
+
+                # 根据是否启用误差消除轨迹，设置不同的yaw角度
+                if ENABLE_CORRECTION_TRAJECTORY:
+                    # 启用误差消除：车子会先回正到0°，然后再规划取货轨迹
+                    pickup_yaw = 0
+                    print("💡 启用误差消除：车子会先回正+倒车0.6米，然后到达取货点")
+                else:
+                    # 禁用误差消除：保持与观察点2相同的朝向
+                    pickup_yaw = -90
+                    print("💡 禁用误差消除：直接从观察点2到达取货点")
+
+                # 第3个目标点使用MODE_FORK，需要提供托盘信息
+                response3 = client.send_goal(x=4.0, y=1.0, yaw_deg=pickup_yaw, mode=GoToPose.Request.MODE_FORK)
+
+                if response3 and response3.arrived:
+                    print("✅ 取货点已到达！\n")
+                    print("🎉 所有任务完成！")
+                else:
+                    print("❌ 取货点执行失败或超时")
             else:
-                print("❌ 取货点执行失败或超时")
+                print("❌ 观察点2执行失败或超时")
         else:
-            print("❌ 观察点执行失败或超时")
+            print("❌ 观察点1执行失败或超时")
 
     except KeyboardInterrupt:
         print("\n⏹️  收到中断信号")

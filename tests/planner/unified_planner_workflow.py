@@ -1,17 +1,16 @@
 #!/usr/bin/env python3
 """
-统一轨迹规划器 - 自动选择规划策略
+统一轨迹规划器 - 基于模式自动选择规划策略
 
 工作流程：
-1. 第一个点（观察点）→ 使用 SimpleTrajectoryPlanner
-2. 第二个点（取货点）→ 使用 ComplexTrajectoryPlanner
+1. 观察点（MODE_NORMAL）→ 使用 SimpleTrajectoryPlanner
+2. 取货点（MODE_FORK）→ 使用 误差消除轨迹 + ComplexTrajectoryPlanner
 
 使用方法：
-1. 启动本程序
-2. 发布第一个目标点（观察点）：python3 publish_test_goal.py --x 3.0 --y 0.0 --yaw-deg 90
-3. 等待第一段轨迹完成
-4. 发布第二个目标点（取货点）：python3 publish_test_goal.py --x 4.0 --y 1.0 --yaw-deg 90
-5. 等待第二段轨迹完成
+1. 启动本程序: python3 unified_planner_workflow.py
+2. 使用 GoToPose Service 发送目标点: python3 test_goto_service.py
+   - 第1个目标点：MODE_NORMAL（观察点）
+   - 第2个目标点：MODE_FORK（取货点，需提供托盘信息）
 """
 
 import rclpy
@@ -30,7 +29,6 @@ from trajectory_planner import SimpleTrajectoryPlanner, ComplexTrajectoryPlanner
 # ==================== 配置参数 ====================
 
 ODOM_TOPIC = "/Odom"
-GOAL_TOPIC = "/nav_goal"
 PATH_TOPIC = "/plans"
 MQTT_BROKER = "192.168.1.102" #localhost for local test  192.168.1.102
 MQTT_PORT = 1883
@@ -59,8 +57,6 @@ class UnifiedPlannerNode(Node):
         # ROS2订阅器
         self.odom_subscriber = self.create_subscription(
             Odometry, ODOM_TOPIC, self.odom_callback, 10)
-        self.goal_subscriber = self.create_subscription(
-            PoseStamped, GOAL_TOPIC, self.goal_callback, 10)
 
         # ROS2发布器
         self.path_publisher = self.create_publisher(Path, PATH_TOPIC, 10)
@@ -77,7 +73,6 @@ class UnifiedPlannerNode(Node):
         # 状态变量
         self.current_odom = None
         self.odom_received = False
-        self.goal_count = 0  # 收到的目标点计数
         self.current_trajectory_id = None
         self.waiting_for_completion = False
         self.trajectory_completed = False  # 轨迹是否完成的标志
@@ -138,52 +133,6 @@ class UnifiedPlannerNode(Node):
         self.current_odom = odom
         self.odom_received = True
         print(f"⚠️  使用默认起点位置: ({DEFAULT_X:.3f}, {DEFAULT_Y:.3f}), 朝向: {DEFAULT_YAW:.3f} ({math.degrees(DEFAULT_YAW):.1f}°)\n")
-
-    def goal_callback(self, msg):
-        """接收目标点并自动选择规划器"""
-        if not self.odom_received:
-            print("⚠️  等待/Odom数据...")
-            return
-
-        if self.waiting_for_completion:
-            print("⚠️  上一段轨迹还在执行中，请等待完成...")
-            return
-
-        self.goal_count += 1
-        goal_pose = msg.pose
-
-        x = goal_pose.position.x
-        y = goal_pose.position.y
-        yaw = self.quaternion_to_yaw(goal_pose.orientation)
-
-        print("\n" + "="*80)
-        if self.goal_count == 1:
-            print("📍 第1个目标点（观察点）")
-            print("="*80)
-            print(f"目标位置: ({x:.3f}, {y:.3f}), 朝向: {yaw:.3f} ({math.degrees(yaw):.1f}°)")
-            print(f"规划策略: SimpleTrajectoryPlanner（前进 + 转弯）\n")
-            self.plan_and_publish_simple(goal_pose)
-        elif self.goal_count == 2:
-            print("📍 第2个目标点（取货点）")
-            print("="*80)
-            print(f"目标位置: ({x:.3f}, {y:.3f}), 朝向: {yaw:.3f} ({math.degrees(yaw):.1f}°)")
-
-            if ENABLE_CORRECTION_TRAJECTORY:
-                print(f"规划策略: 误差消除轨迹 + ComplexTrajectoryPlanner\n")
-                print(f"   步骤1: 回正 + 倒车{CORRECTION_BACKWARD_DISTANCE}米（消除旋转误差）")
-                print(f"   步骤2: 转弯 + 前进 + 转弯 + 倒车（到达取货点）\n")
-                self.pending_pickup_goal = goal_pose  # 保存目标点
-                self.plan_and_publish_correction_trajectory()
-            else:
-                print(f"规划策略: ComplexTrajectoryPlanner（转弯 + 前进 + 转弯 + 倒车）\n")
-                self.plan_and_publish_complex(goal_pose)
-        else:
-            print(f"📍 收到第{self.goal_count}个目标点")
-            print("="*80)
-            print(f"⚠️  已完成观察点和取货点的轨迹规划（共2个目标点）")
-            print(f"⚠️  忽略额外目标点: ({x:.3f}, {y:.3f})")
-            print(f"💡 如需继续规划，请重启程序")
-            print("="*80)
 
     def plan_and_publish_simple(self, goal_pose):
         """使用SimpleTrajectoryPlanner规划并发布"""
@@ -641,7 +590,6 @@ class UnifiedPlannerNode(Node):
             print(f"✅ 接受为观察点（MODE_NORMAL）")
             print(f"规划策略: SimpleTrajectoryPlanner\n")
             self.plan_and_publish_simple(goal_pose)
-            self.goal_count += 1
 
         elif mode == GoToPose.Request.MODE_FORK:
             print(f"✅ 接受为叉取点（MODE_FORK）")
@@ -652,7 +600,6 @@ class UnifiedPlannerNode(Node):
             else:
                 print(f"规划策略: ComplexTrajectoryPlanner\n")
                 self.plan_and_publish_complex(goal_pose)
-            self.goal_count += 1
 
         # ===== 等待轨迹完成 =====
         print("="*80)
@@ -679,7 +626,8 @@ class UnifiedPlannerNode(Node):
                 print("="*80 + "\n")
 
                 response.arrived = True
-                response.message = f"目标点{self.goal_count}已到达"
+                mode_name = "观察点" if mode == GoToPose.Request.MODE_NORMAL else "取货点"
+                response.message = f"{mode_name}已到达"
                 print(f"📤 返回响应: arrived=True, message={response.message}")
                 print("="*80 + "\n")
                 return response
@@ -690,7 +638,8 @@ class UnifiedPlannerNode(Node):
         print("="*80 + "\n")
 
         response.arrived = False
-        response.message = f"目标点{self.goal_count}执行超时"
+        mode_name = "观察点" if mode == GoToPose.Request.MODE_NORMAL else "取货点"
+        response.message = f"{mode_name}执行超时"
         print(f"📤 返回响应: arrived=False, message={response.message}")
         print("="*80 + "\n")
 
@@ -764,9 +713,9 @@ class UnifiedPlannerNode(Node):
                     if hasattr(self, 'forward_trajectory_waypoints'):
                         self.update_odom_from_trajectory_end(self.forward_trajectory_waypoints)
 
-                    print("⏳ 等待3秒后发布倒车轨迹...\n")
-                    time.sleep(3)
-                    self.publish_backward_trajectory()
+                    # print("⏳ 等待秒后发布倒车轨迹...\n")
+                    # time.sleep(3)
+                    # self.publish_backward_trajectory()
 
                 elif "pickup_backward" in self.current_trajectory_id:
                     print("🎉 所有轨迹已完成！")
@@ -865,19 +814,16 @@ def main():
         node.create_default_odom()
 
     print("="*80)
-    print("📍 请按顺序发布目标点：")
+    print("📍 测试方法：")
     print()
-    print("第1步 - 发布观察点：")
-    print("  python3 publish_test_goal.py --x 3.0 --y 0.0 --yaw-deg -90")
+    print("使用 GoToPose Service（推荐）：")
+    print("  python3 test_goto_service.py")
     print()
+    print("说明：")
+    print("  - 第1个目标点（观察点）：MODE_NORMAL")
+    print("  - 第2个目标点（取货点）：MODE_FORK，需提供托盘信息")
     if ENABLE_CORRECTION_TRAJECTORY:
-        print("第2步 - 等待第1段轨迹完成后，发布取货点：")
-        print("  python3 publish_test_goal.py --x 4.0 --y 1.0 --yaw-deg 0")
-        print()
-        print(f"💡 启用误差消除：观察点完成后会先回正+倒车{CORRECTION_BACKWARD_DISTANCE}米，再到达取货点")
-    else:
-        print("第2步 - 等待第1段轨迹完成后，发布取货点：")
-        print("  python3 publish_test_goal.py --x 4.0 --y 1.0 --yaw-deg 90")
+        print(f"  - 启用误差消除：观察点完成后会先回正+倒车{CORRECTION_BACKWARD_DISTANCE}米")
     print("="*80)
     print()
 
