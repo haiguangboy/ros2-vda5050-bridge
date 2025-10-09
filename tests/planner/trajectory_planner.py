@@ -98,14 +98,31 @@ class SimpleTrajectoryPlanner:
             waypoints.append((current_x, current_y, current_yaw))
 
         # 阶段2：直线移动到目标位置
-        num_points = int(distance / self.step_size) + 1
-        print(f"   阶段2: 直线移动 {distance:.3f}m (点间距{self.step_size}m, {num_points}个点)")
+        # 策略：最后一个点必须是精确目标点，如果最后一段 < 0.05m 则合并到目标点
+        num_steps = int(distance / self.step_size)
+        remaining_distance = distance - num_steps * self.step_size
 
-        for i in range(1, num_points + 1):
-            t = i / num_points
-            x = start_x + dx * t
-            y = start_y + dy * t
+        # 生成中间点（按step_size间隔）
+        for i in range(1, num_steps + 1):
+            dist = i * self.step_size
+            x = start_x + (dx / distance) * dist
+            y = start_y + (dy / distance) * dist
             waypoints.append((x, y, current_yaw))
+
+        # 处理最后一段距离
+        if remaining_distance > 0.001:  # 有剩余距离
+            if remaining_distance < 0.05:  # 剩余距离太小，去掉最后一个中间点
+                if len(waypoints) > 1:  # 确保有点可以去掉
+                    waypoints.pop()  # 去掉倒数第二个点
+                    print(f"   阶段2: 直线移动 {distance:.3f}m (点间距{self.step_size}m, {num_steps-1}个点 + 终点, 最后{remaining_distance:.3f}m < 0.05m已合并)")
+                else:
+                    print(f"   阶段2: 直线移动 {distance:.3f}m (点间距{self.step_size}m, 终点)")
+            else:
+                print(f"   阶段2: 直线移动 {distance:.3f}m (点间距{self.step_size}m, {num_steps}个点 + 终点)")
+            # 添加精确的目标点
+            waypoints.append((goal_x, goal_y, current_yaw))
+        else:
+            print(f"   阶段2: 直线移动 {distance:.3f}m (点间距{self.step_size}m, {num_steps}个点)")
 
         current_x, current_y = goal_x, goal_y
 
@@ -257,33 +274,69 @@ class ComplexTrajectoryPlanner:
         current_y = start_y
         current_yaw = start_yaw
 
-        # 阶段1: 第一次左转（原地旋转，只生成起点和终点）
-        print(f"   阶段1: 原地左转 {math.degrees(first_turn_angle):.1f}°")
+        # 阶段1: 第一次左转（原地旋转）
         yaw_after_first_turn = start_yaw + first_turn_angle
-        waypoints.append((current_x, current_y, current_yaw))  # 起点
-        waypoints.append((current_x, current_y, yaw_after_first_turn))  # 转弯后
+
+        # 只有转弯角度大于阈值时才添加转弯点
+        if abs(first_turn_angle) > 0.01:  # 约0.57度
+            print(f"   阶段1: 原地左转 {math.degrees(first_turn_angle):.1f}°")
+            waypoints.append((current_x, current_y, current_yaw))  # 起点
+            waypoints.append((current_x, current_y, yaw_after_first_turn))  # 转弯后
+        else:
+            # 角度太小，只添加起点
+            print(f"   阶段1: 转弯角度很小({math.degrees(first_turn_angle):.1f}°)，只添加起点")
+            waypoints.append((current_x, current_y, yaw_after_first_turn))  # 起点（使用转弯后的yaw）
+
         current_yaw = yaw_after_first_turn
 
         # 阶段2: 前进
-        num_forward_points = int(forward_distance / self.forward_step) + 1
-        print(f"   阶段2: 前进 {forward_distance:.3f}m (点间距{self.forward_step}m, {num_forward_points}个点)")
+        # 策略：最后一个点必须是精确目标点，如果最后一段 < 0.05m 则合并到目标点
+        num_steps = int(forward_distance / self.forward_step)
+        remaining_distance = forward_distance - num_steps * self.forward_step
 
-        for i in range(1, num_forward_points + 1):
+        # 生成中间点（按forward_step间隔）
+        for i in range(1, num_steps + 1):
             dist = i * self.forward_step
-            if dist > forward_distance:
-                dist = forward_distance
             x = current_x + dist * math.cos(current_yaw)
             y = current_y + dist * math.sin(current_yaw)
             waypoints.append((x, y, current_yaw))
 
-        # 更新当前位置到前进终点
-        current_x = current_x + forward_distance * math.cos(current_yaw)
-        current_y = current_y + forward_distance * math.sin(current_yaw)
+        # 计算目标位置
+        target_x = current_x + forward_distance * math.cos(current_yaw)
+        target_y = current_y + forward_distance * math.sin(current_yaw)
 
-        # 阶段3: 第二次左转（原地旋转，只生成终点）
-        print(f"   阶段3: 原地左转 {math.degrees(second_turn_angle):.1f}°")
+        # 处理最后一段距离
+        if remaining_distance > 0.001:  # 有剩余距离
+            if remaining_distance < 0.05:  # 剩余距离太小，去掉最后一个中间点
+                if len(waypoints) > 2:  # 确保有点可以去掉（前面有起点和转弯点）
+                    waypoints.pop()  # 去掉倒数第二个点
+                    print(f"   阶段2: 前进 {forward_distance:.3f}m (点间距{self.forward_step}m, {num_steps-1}个点 + 终点, 最后{remaining_distance:.3f}m < 0.05m已合并)")
+                else:
+                    print(f"   阶段2: 前进 {forward_distance:.3f}m (点间距{self.forward_step}m, 终点)")
+            else:
+                print(f"   阶段2: 前进 {forward_distance:.3f}m (点间距{self.forward_step}m, {num_steps}个点 + 终点)")
+            # 添加精确的目标点
+            waypoints.append((target_x, target_y, current_yaw))
+        else:
+            print(f"   阶段2: 前进 {forward_distance:.3f}m (点间距{self.forward_step}m, {num_steps}个点)")
+
+        # 更新当前位置到前进终点
+        current_x = target_x
+        current_y = target_y
+
+        # 阶段3: 第二次左转（原地旋转，只在有转弯时添加）
         yaw_after_second_turn = current_yaw + second_turn_angle
-        waypoints.append((current_x, current_y, yaw_after_second_turn))
+
+        # 只有转弯角度大于阈值时才添加新点
+        if abs(second_turn_angle) > 0.01:  # 约0.57度
+            print(f"   阶段3: 原地左转 {math.degrees(second_turn_angle):.1f}°")
+            waypoints.append((current_x, current_y, yaw_after_second_turn))
+        else:
+            # 角度太小，不添加新点，但更新最后一个点的yaw
+            if waypoints:
+                last_x, last_y, _ = waypoints[-1]
+                waypoints[-1] = (last_x, last_y, yaw_after_second_turn)
+            print(f"   阶段3: 转弯角度很小({math.degrees(second_turn_angle):.1f}°)，合并到前一点")
 
         print(f"   ✅ 前向轨迹规划完成: 共 {len(waypoints)} 个路径点")
         print(f"   终点: ({current_x:.3f}, {current_y:.3f}), yaw={yaw_after_second_turn:.3f} ({math.degrees(yaw_after_second_turn):.1f}°)\n")
@@ -314,16 +367,14 @@ class ComplexTrajectoryPlanner:
         print(f"   Y方向位移: {backward_distance:.3f}m")
 
         # 计算倒车路径点数量（使用绝对值）
+        # 策略：最后一个点必须是精确目标点，如果最后一段 < 0.05m 则合并到目标点
         abs_distance = abs(backward_distance)
-        num_backward_points = int(abs_distance / self.backward_step) + 1
-        print(f"   生成路径点: {num_backward_points}个 (点间距{self.backward_step}m)")
+        num_steps = int(abs_distance / self.backward_step)
+        remaining_distance = abs_distance - num_steps * self.backward_step
 
-        # 生成倒车路径点（沿y轴方向移动，朝向保持不变）
-        # backward_distance为负时，沿-y方向移动
-        for i in range(num_backward_points):
-            dist = i * self.backward_step
-            if dist > abs_distance:
-                dist = abs_distance
+        # 生成中间点（按backward_step间隔）
+        for i in range(num_steps):
+            dist = (i + 1) * self.backward_step
 
             # 沿y轴方向移动：如果backward_distance为负，则向-y移动
             if backward_distance >= 0:
@@ -333,9 +384,24 @@ class ComplexTrajectoryPlanner:
 
             waypoints.append((start_x, y, start_yaw))  # x保持不变，yaw保持不变
 
-        # 计算并打印终点
+        # 计算目标位置
         end_x = start_x
         end_y = start_y + backward_distance
+
+        # 处理最后一段距离
+        if remaining_distance > 0.001:  # 有剩余距离
+            if remaining_distance < 0.05:  # 剩余距离太小，去掉最后一个中间点
+                if len(waypoints) > 0:  # 确保有点可以去掉
+                    waypoints.pop()  # 去掉倒数第二个点
+                    print(f"   生成路径点: {num_steps-1}个 (点间距{self.backward_step}m) + 终点, 最后{remaining_distance:.3f}m < 0.05m已合并")
+                else:
+                    print(f"   生成路径点: 终点")
+            else:
+                print(f"   生成路径点: {num_steps}个 (点间距{self.backward_step}m) + 终点")
+            # 添加精确的目标点
+            waypoints.append((end_x, end_y, start_yaw))
+        else:
+            print(f"   生成路径点: {num_steps}个 (点间距{self.backward_step}m)")
 
         print(f"   ✅ 后向轨迹规划完成: 共 {len(waypoints)} 个路径点")
         print(f"   终点: ({end_x:.3f}, {end_y:.3f}), yaw={start_yaw:.3f} ({math.degrees(start_yaw):.1f}°)\n")

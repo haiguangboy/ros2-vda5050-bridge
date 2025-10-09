@@ -401,19 +401,34 @@ class UnifiedPlannerNode(Node):
         # 发布后向轨迹
         backward_trajectory_id = f"pickup_backward_{int(time.time() * 1000)}"
 
-        # 如果有托盘信息（MODE_FORK），使用托盘信息
+        # 如果有托盘信息（MODE_FORK），使用完整的托盘信息
         if self.pallet_info:
             container_type = "AGV-T300"  # 默认容器类型
             container_x = self.pallet_info['x']
             container_y = self.pallet_info['y']
-            print(f"📦 托盘信息:")
-            print(f"   容器类型: {container_type}")
-            print(f"   容器位置: ({container_x:.3f}, {container_y:.3f})\n")
+            container_z = self.pallet_info['pose'].position.z  # 托盘z坐标
+            container_theta = self.quaternion_to_yaw(self.pallet_info['pose'].orientation)  # 托盘朝向
+            container_width = self.pallet_info['size'].x  # 使用托盘尺寸的x作为宽度
 
-            # self.publish_path(backward_waypoints, backward_trajectory_id, orientation=3.14, flag=1,
-            #                 container_type=container_type, container_x=container_x, container_y=container_y)
-            # 假设没有托盘信息（目前控制器不支持）
-            self.publish_path(backward_waypoints, backward_trajectory_id, orientation=3.14, flag=0)
+            print(f"📦 ContainerPose:")
+            print(f"   x: {container_x:.3f}")
+            print(f"   y: {container_y:.3f}")
+            print(f"   z: {container_z:.3f}")
+            print(f"   theta: {container_theta:.3f}")
+            print(f"   width: {container_width:.2f}")
+            print(f"   container_type: {container_type}\n")
+
+            self.publish_path(
+                backward_waypoints, backward_trajectory_id,
+                orientation=3.14, flag=0,
+                action_type="ground_pick",  # 地面取货动作
+                container_type=container_type,
+                container_x=container_x,
+                container_y=container_y,
+                container_z=container_z,
+                container_theta=container_theta,
+                container_width=container_width
+            )
         else:
             # 没有托盘信息（兼容旧方式）
             self.publish_path(backward_waypoints, backward_trajectory_id, orientation=3.14, flag=0)
@@ -427,13 +442,32 @@ class UnifiedPlannerNode(Node):
         print("⏳ 等待MQTT完成信号...\n")
 
     def publish_path(self, waypoints, trajectory_id, orientation=0.0, flag=0,
-                    container_type="", container_x=0.0, container_y=0.0):
-        """发布路径到/plans话题"""
+                    action_type="", container_type="",
+                    container_x=0.0, container_y=0.0, container_z=0.0,
+                    container_theta=0.0, container_width=1.2):
+        """
+        发布路径到/plans话题
+
+        Args:
+            waypoints: 路径点列表 [(x, y, yaw), ...]
+            trajectory_id: 轨迹ID
+            orientation: 朝向 (0=前向, 3.14=倒车)
+            flag: 标志 (0=正常, 1=分支)
+            action_type: 动作类型 (ground_pick, load等)
+            container_type: 容器类型 (如 "AGV-T300")
+            container_x, container_y, container_z: 容器位置
+            container_theta: 容器朝向 (弧度)
+            container_width: 容器宽度 (米)
+        """
         path = Path()
         path.header.stamp = self.get_clock().now().to_msg()
 
         # Beta-3协议：frame_id格式
-        path.header.frame_id = f"map|0|0|{orientation}|{flag}|0|0|{container_type}|{container_x}|{container_y}|{trajectory_id}"
+        # "map|action_type|container_type|orientation|flag|container_x|container_y|container_z|container_theta|container_width|trajectory_id"
+        path.header.frame_id = (
+            f"map|{action_type}|{container_type}|{orientation}|{flag}|"
+            f"{container_x}|{container_y}|{container_z}|{container_theta}|{container_width}|{trajectory_id}"
+        )
 
         # 添加路径点
         from geometry_msgs.msg import PoseStamped
@@ -555,6 +589,11 @@ class UnifiedPlannerNode(Node):
                 'x': pallet_x,
                 'y': pallet_y
             }
+
+        # 检查Odom是否就绪
+        if not self.odom_received:
+            print("⚠️  /Odom数据未就绪，使用默认起点位置")
+            self.create_default_odom()
 
         # 检查是否可以接受新目标
         if self.waiting_for_completion:

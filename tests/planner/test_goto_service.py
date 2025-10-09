@@ -66,12 +66,20 @@ class GoToPoseClient(Node):
             request.pallet_pose.orientation = self.yaw_to_quaternion(math.radians(yaw_deg))
 
             # 托盘尺寸（示例值）
-            request.pallet_size.x = 1.2
-            request.pallet_size.y = 0.8
-            request.pallet_size.z = 0.15
+            # 注意：pallet_size.x 会被用作 container_width（容器宽度）
+            request.pallet_size.x = 1.2  # 宽度（）
+            request.pallet_size.y = 0.8  # 长度 会用作container_width（容器宽度）
+            request.pallet_size.z = 0.15  # 高度
 
-            print(f"   托盘信息: 位置=({request.pallet_pose.position.x:.2f}, {request.pallet_pose.position.y:.2f}), "
-                  f"尺寸=({request.pallet_size.x:.2f}x{request.pallet_size.y:.2f}x{request.pallet_size.z:.2f})")
+            # 计算theta（从yaw_deg转换）
+            theta = math.radians(yaw_deg)
+
+            print(f"   Pallet → ContainerPose mapping:")
+            print(f"   x: {request.pallet_pose.position.x:.2f}")
+            print(f"   y: {request.pallet_pose.position.y:.2f}")
+            print(f"   z: {request.pallet_pose.position.z:.2f}")
+            print(f"   theta: {theta:.3f}")
+            print(f"   width: {request.pallet_size.y:.2f}")
 
         print(f"📤 发送目标点: ({x}, {y}, {yaw_deg}°)")
         mode_str = "NORMAL" if mode == GoToPose.Request.MODE_NORMAL else "FORK"
