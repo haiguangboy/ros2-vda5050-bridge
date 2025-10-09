@@ -448,7 +448,7 @@ class UnifiedPlannerNode(Node):
 
             self.publish_path(
                 backward_waypoints, backward_trajectory_id,
-                orientation=3.14, flag=0,
+                orientation=3.14, flag=1,
                 action_type="ground_pick",  # 地面取货动作
                 container_type=container_type,
                 container_x=container_x,
