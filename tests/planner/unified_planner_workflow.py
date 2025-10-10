@@ -24,6 +24,7 @@ import json
 import time
 import math
 from trajectory_planner import SimpleTrajectoryPlanner, ComplexTrajectoryPlanner
+from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy, HistoryPolicy
 
 
 # ==================== 配置参数 ====================
@@ -58,6 +59,10 @@ DEFAULT_YAW = 0.0
 
 # 等待的时间
 WAIT_TIME = 2.1
+# 在前向段完成后等待/Odom刷新（生产环境）
+ODOM_WAIT_TIMEOUT = 1.5  # 秒
+ODOM_POS_TOL = 0.15      # 位置容差（米）
+ODOM_YAW_TOL = 0.35      # 朝向容差（弧度）
 
 
 # ==================== 统一规划器节点 ====================
@@ -70,9 +75,15 @@ class UnifiedPlannerNode(Node):
         self.simple_planner = SimpleTrajectoryPlanner(step_size=0.15)
         self.complex_planner = ComplexTrajectoryPlanner(forward_step=0.15, backward_step=0.15)
 
-        # ROS2订阅器
+        # ROS2订阅器（显式QoS，确保与发布端兼容）
+        odom_qos = QoSProfile(
+            depth=50,
+            reliability=ReliabilityPolicy.RELIABLE,
+            durability=DurabilityPolicy.VOLATILE,
+            history=HistoryPolicy.KEEP_LAST,
+        )
         self.odom_subscriber = self.create_subscription(
-            Odometry, ODOM_TOPIC, self.odom_callback, 10)
+            Odometry, ODOM_TOPIC, self.odom_callback, odom_qos)
 
         # ROS2发布器
         self.path_publisher = self.create_publisher(Path, PATH_TOPIC, 10)
@@ -96,6 +107,11 @@ class UnifiedPlannerNode(Node):
         self.pending_unload_goal = None  # 暂存卸货目标点
         self.pallet_info = None  # 托盘信息（mode=FORK时使用）
         self.last_mode = None  # 记录上一次的模式，用于判断是否触发卸货轨迹
+        self.odom_update_count = 0  # /Odom更新计数（用于验证订阅是否持续接收）
+        self.forward_start_stamp = None  # 前向轨迹起点读取的/Odom时间戳（sec, nsec）
+        # 最近一次接收到的/Odom时间戳与姿态（用于判定是否收到“新鲜”数据）
+        self.last_odom_stamp = None
+        self.last_odom_tuple = None  # (x, y, yaw)
 
         # 卸货轨迹的waypoints（用于测试环境更新Odom）
         self.unload_stage1_waypoints = None  # 倒车回主干道
@@ -139,23 +155,69 @@ class UnifiedPlannerNode(Node):
     def odom_callback(self, msg):
         """接收Odom数据"""
         self.current_odom = msg
+        # 计数与轻量打印（每20次）
+        self.odom_update_count += 1
+        if self.odom_update_count % 20 == 0:
+            x_dbg = msg.pose.pose.position.x
+            y_dbg = msg.pose.pose.position.y
+            yaw_dbg = self.quaternion_to_yaw(msg.pose.pose.orientation)
+            print(f"📡 /Odom 更新计数: {self.odom_update_count} (x={x_dbg:.3f}, y={y_dbg:.3f}, yaw={yaw_dbg:.3f})")
+        # 记录最近一次的/Odom时间戳与姿态
+        try:
+            self.last_odom_stamp = (msg.header.stamp.sec, msg.header.stamp.nanosec)
+        except Exception:
+            self.last_odom_stamp = (0, 0)
+        x = msg.pose.pose.position.x
+        y = msg.pose.pose.position.y
+        yaw = self.quaternion_to_yaw(msg.pose.pose.orientation)
+        self.last_odom_tuple = (x, y, yaw)
         if not self.odom_received:
             self.odom_received = True
-            x = msg.pose.pose.position.x
-            y = msg.pose.pose.position.y
-            yaw = self.quaternion_to_yaw(msg.pose.pose.orientation)
             print(f"✅ 已接收到 /Odom 话题数据")
             print(f"   当前位置: ({x:.3f}, {y:.3f}), 朝向: {yaw:.3f} ({math.degrees(yaw):.1f}°)\n")
 
     def create_default_odom(self):
         """创建默认Odom数据"""
         odom = Odometry()
+        odom.header.stamp = self.get_clock().now().to_msg()
         odom.pose.pose.position.x = DEFAULT_X
         odom.pose.pose.position.y = DEFAULT_Y
         odom.pose.pose.orientation = self.euler_to_quaternion(0, 0, DEFAULT_YAW)
         self.current_odom = odom
         self.odom_received = True
+        # 记录默认的时间戳与姿态
+        try:
+            self.last_odom_stamp = (odom.header.stamp.sec, odom.header.stamp.nanosec)
+        except Exception:
+            self.last_odom_stamp = (0, 0)
+        self.last_odom_tuple = (DEFAULT_X, DEFAULT_Y, DEFAULT_YAW)
         print(f"⚠️  使用默认起点位置: ({DEFAULT_X:.3f}, {DEFAULT_Y:.3f}), 朝向: {DEFAULT_YAW:.3f} ({math.degrees(DEFAULT_YAW):.1f}°)\n")
+
+    def _wait_for_fresh_odom(self, prev_stamp, prev_pose):
+        """等待/Odom刷新，直至时间戳或位姿发生变化，或超时。
+
+        Args:
+            prev_stamp: 上一次记录的时间戳 (sec, nsec) 元组
+            prev_pose: 上一次的 (x, y, yaw) 元组
+        Returns:
+            True 如果收到了看起来更新的/Odom；False 超时未更新。
+        """
+        start = time.time()
+        while time.time() - start < ODOM_WAIT_TIMEOUT:
+            now_stamp = self.last_odom_stamp
+            now_pose = self.last_odom_tuple
+            if now_stamp is None or now_pose is None:
+                time.sleep(0.02)
+                continue
+            # 时间戳变化或位姿变化超过极小阈值即认为更新
+            if now_stamp != prev_stamp:
+                return True
+            px, py, pyaw = prev_pose
+            nx, ny, nyaw = now_pose
+            if math.hypot(nx - px, ny - py) > 1e-3 or abs(self._normalize_angle(nyaw - pyaw)) > 1e-3:
+                return True
+            time.sleep(0.02)
+        return False
 
     def plan_and_publish_simple(self, goal_pose):
         """使用SimpleTrajectoryPlanner规划并发布"""
@@ -309,6 +371,16 @@ class UnifiedPlannerNode(Node):
 
         # 获取当前位置（从/Odom读取，由第一段轨迹完成后更新）
         start_pose = self.current_odom.pose.pose
+        # 记录并打印当前/Odom时间戳（作为前向起点的定位时间戳）
+        try:
+            fs = self.current_odom.header.stamp
+            fs_sec = getattr(fs, 'sec', 0)
+            fs_nsec = getattr(fs, 'nanosec', getattr(fs, 'nsec', 0))
+            self.forward_start_stamp = (fs_sec, fs_nsec)
+            print(f"🕒 前向起点 /Odom 时间戳: {fs_sec}.{fs_nsec:09d}")
+        except Exception:
+            self.forward_start_stamp = None
+            print("🕒 前向起点 /Odom 时间戳: 无（header.stamp不可用）")
         start_x = start_pose.position.x
         start_y = start_pose.position.y
         start_yaw = self.quaternion_to_yaw(start_pose.orientation)
@@ -378,7 +450,7 @@ class UnifiedPlannerNode(Node):
 
             self.publish_path(
                 forward_waypoints, forward_trajectory_id,
-                orientation=3.14, flag=1,
+                orientation=3.14, flag=0,
                 action_type="pub_load_params",  # 地面取货动作
                 container_type=container_type,
                 container_x=container_x,
@@ -414,11 +486,51 @@ class UnifiedPlannerNode(Node):
         print("📤 规划并发布后向轨迹（倒车）")
         print("="*80)
 
-        # 从/Odom读取当前位置（前向轨迹完成后的实际位置）
-        intermediate_pose = self.current_odom.pose.pose
-        current_x = intermediate_pose.position.x
-        current_y = intermediate_pose.position.y
-        current_yaw = self.quaternion_to_yaw(intermediate_pose.orientation)
+        # 从/Odom读取当前位置（前向轨迹完成后的实际位置），
+        # 若/Odom未更新（生产环境下机器人未发布最新位置），则回退使用“前向轨迹终点”作为起点。
+        odom_pose = self.current_odom.pose.pose
+        # 记录并打印当前/Odom时间戳（作为倒车起点的定位时间戳）
+        try:
+            bs = self.current_odom.header.stamp
+            bs_sec = getattr(bs, 'sec', 0)
+            bs_nsec = getattr(bs, 'nanosec', getattr(bs, 'nsec', 0))
+            print(f"🕒 倒车起点 /Odom 时间戳: {bs_sec}.{bs_nsec:09d}")
+            if self.forward_start_stamp is not None:
+                fs_sec, fs_nsec = self.forward_start_stamp
+                same_stamp = (bs_sec == fs_sec and bs_nsec == fs_nsec)
+                if same_stamp:
+                    print("⚠️ 时间戳相同：定位信息可能未更新（倒车段将使用与前向起点相同的/Odom）")
+                else:
+                    print(f"✅ 时间戳不同：定位信息已更新（前向: {fs_sec}.{fs_nsec:09d} → 倒车: {bs_sec}.{bs_nsec:09d}）")
+            else:
+                print("ℹ️ 无前向起点时间戳记录，无法比较")
+        except Exception:
+            print("🕒 倒车起点 /Odom 时间戳: 无（header.stamp不可用）")
+        odom_x = odom_pose.position.x
+        odom_y = odom_pose.position.y
+        odom_yaw = self.quaternion_to_yaw(odom_pose.orientation)
+
+        use_forward_end = False
+        forward_end_x = forward_end_y = forward_end_yaw = None
+        if hasattr(self, 'forward_trajectory_waypoints') and self.forward_trajectory_waypoints:
+            forward_end_x, forward_end_y, forward_end_yaw = self.forward_trajectory_waypoints[-1]
+            # 判定/Odom是否明显滞后（与前向终点相差较大）
+            pos_diff = math.hypot(odom_x - forward_end_x, odom_y - forward_end_y)
+            yaw_diff = abs(self._normalize_angle(odom_yaw - forward_end_yaw))
+            if pos_diff > 0.20 or yaw_diff > 0.40:  # 阈值：20cm或>~23°
+                use_forward_end = True
+
+        if use_forward_end:
+            print(f"⚠️  检测到/Odom未更新至前向终点，使用前向终点作为倒车起点")
+            current_x, current_y, current_yaw = forward_end_x, forward_end_y, forward_end_yaw
+            intermediate_pose = Pose()
+            intermediate_pose.position.x = current_x
+            intermediate_pose.position.y = current_y
+            intermediate_pose.position.z = 0.0
+            intermediate_pose.orientation = self.euler_to_quaternion(0, 0, current_yaw)
+        else:
+            intermediate_pose = odom_pose
+            current_x, current_y, current_yaw = odom_x, odom_y, odom_yaw
 
         # 获取目标位置
         goal_x = self.backward_params['goal_x']
@@ -480,7 +592,7 @@ class UnifiedPlannerNode(Node):
         #     # 没有托盘信息（兼容旧方式）
         #     self.publish_path(backward_waypoints, backward_trajectory_id, orientation=3.14, flag=0)
 
-        self.publish_path(backward_waypoints, backward_trajectory_id, orientation=3.14, flag=0)
+        self.publish_path(backward_waypoints, backward_trajectory_id, orientation=3.14, flag=1)
 
         self.current_trajectory_id = backward_trajectory_id
         self.waiting_for_completion = True
@@ -1023,8 +1135,17 @@ class UnifiedPlannerNode(Node):
                     if TEST_MODE and hasattr(self, 'forward_trajectory_waypoints'):
                         self.update_odom_from_trajectory_end(self.forward_trajectory_waypoints)
 
-                    print("⏳ 等待0.1秒后发布倒车轨迹...\n")
-                    time.sleep(WAIT_TIME)
+                    # 生产环境：等待真实/Odom刷新（由底盘发布）
+                    prev_stamp = self.last_odom_stamp
+                    prev_pose = self.last_odom_tuple
+                    print("⏳ 等待/Odom刷新以使用实时位置...\n")
+                    refreshed = self._wait_for_fresh_odom(prev_stamp, prev_pose)
+                    if not refreshed:
+                        print(f"⚠️  在 {ODOM_WAIT_TIMEOUT:.1f}s 内未检测到/Odom更新，将继续使用当前/Odom值\n")
+                    else:
+                        x, y, yaw = self.last_odom_tuple
+                        print(f"✅ 检测到/Odom已刷新: ({x:.3f}, {y:.3f}), yaw={yaw:.3f} ({math.degrees(yaw):.1f}°)\n")
+
                     self.publish_backward_trajectory()
 
                 elif "pickup_backward" in self.current_trajectory_id:
