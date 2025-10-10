@@ -33,14 +33,14 @@ ENABLE_UNLOAD_TRAJECTORY = True  # 卸货轨迹
 # 测试点位配置
 TEST_POINTS = {
     'observation': {
-        'x': 3.0,
+        'x': 1.0,
         'y': 0.0,
         'yaw_deg': -90,
         'mode': 'NORMAL',
         'description': '观察点'
     },
     'pickup': {
-        'x': 4.0,
+        'x': 2.0,
         'y': -1.0,
         'yaw_deg': 90,
         'mode': 'FORK',
@@ -48,7 +48,7 @@ TEST_POINTS = {
     },
     'unload': {
         'x': 1.0,
-        'y': 2.0,
+        'y': 1.0,
         'yaw_deg': -90,
         'mode': 'NORMAL',
         'description': '卸货点'
