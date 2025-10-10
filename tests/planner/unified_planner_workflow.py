@@ -380,16 +380,25 @@ class UnifiedPlannerNode(Node):
         print("📤 规划并发布后向轨迹（倒车）")
         print("="*80)
 
-        # 从/Odom读取当前位置（已被前向轨迹完成后更新）
+        # 从/Odom读取当前位置（前向轨迹完成后的实际位置）
         intermediate_pose = self.current_odom.pose.pose
+        current_x = intermediate_pose.position.x
+        current_y = intermediate_pose.position.y
+        current_yaw = self.quaternion_to_yaw(intermediate_pose.orientation)
 
-        # 获取动态计算的倒车距离
-        backward_distance = self.backward_params['backward_distance']
+        # 获取目标位置
         goal_x = self.backward_params['goal_x']
         goal_y = self.backward_params['goal_y']
 
+        # 🔧 关键修复：根据当前实际位置重新计算倒车距离
+        # 不使用预先计算的距离，而是从当前真实位置到目标位置
+        backward_distance = goal_y - current_y
+
+        print(f"📍 当前位置（从/Odom读取）: ({current_x:.3f}, {current_y:.3f}), yaw={current_yaw:.3f} ({math.degrees(current_yaw):.1f}°)")
+        print(f"📍 目标位置: ({goal_x:.3f}, {goal_y:.3f})")
         print(f"📐 倒车参数:")
-        print(f"   倒车距离: {backward_distance:.3f} m")
+        print(f"   倒车距离（重新计算）: {backward_distance:.3f} m")
+        print(f"   计算方式: goal_y({goal_y:.3f}) - current_y({current_y:.3f})")
         print(f"   倒车终点: ({goal_x:.3f}, {goal_y:.3f})\n")
 
         # 规划后向轨迹
@@ -518,14 +527,17 @@ class UnifiedPlannerNode(Node):
         current_y = current_pose.position.y
         current_yaw = self.quaternion_to_yaw(current_pose.orientation)
 
-        print(f"📍 当前位置: ({current_x:.3f}, {current_y:.3f}), yaw={current_yaw:.3f} ({math.degrees(current_yaw):.1f}°)")
+        print(f"📍 当前位置（从/Odom读取）: ({current_x:.3f}, {current_y:.3f}), yaw={current_yaw:.3f} ({math.degrees(current_yaw):.1f}°)")
 
         # 获取目标x坐标（卸货点的x）
         goal_x = self.pending_unload_goal.position.x
+        # 🔧 修复：根据实际位置重新计算前进距离
         forward_distance = abs(goal_x - current_x)
 
-        print(f"📐 右转90° + 沿主干道前进 {forward_distance:.3f}米")
-        print(f"   起点x: {current_x:.3f} → 终点x: {goal_x:.3f}\n")
+        print(f"📐 右转90° + 沿主干道前进（重新计算距离）")
+        print(f"   前进距离: {forward_distance:.3f}米")
+        print(f"   起点x: {current_x:.3f} → 终点x: {goal_x:.3f}")
+        print(f"   计算方式: abs(goal_x({goal_x:.3f}) - current_x({current_x:.3f}))\n")
 
         # 使用ComplexTrajectoryPlanner的plan_forward_with_turns方法
         # 参数：右转90°（+π/2）、前进、不转弯（0）
@@ -577,10 +589,12 @@ class UnifiedPlannerNode(Node):
         # 获取卸货点的y坐标
         goal_y = self.pending_unload_goal.position.y
         goal_yaw = self.quaternion_to_yaw(self.pending_unload_goal.orientation)
-        backward_distance = abs(goal_y - current_y)
+        # 🔧 修复：根据实际位置重新计算倒车距离（不使用abs，保持方向）
+        backward_distance = goal_y - current_y
 
-        print(f"📐 倒车距离: {backward_distance:.3f}米")
+        print(f"📐 倒车距离（重新计算）: {backward_distance:.3f}米")
         print(f"   起点y: {current_y:.3f} → 终点y: {goal_y:.3f}")
+        print(f"   计算方式: goal_y({goal_y:.3f}) - current_y({current_y:.3f})")
         print(f"   终点yaw: {goal_yaw:.3f} ({math.degrees(goal_yaw):.1f}°)\n")
 
         # 生成第3段轨迹：旋转 + 倒车
