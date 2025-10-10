@@ -55,14 +55,16 @@ zhongli_protocol::TrajectoryMessage PathConverter::convert_path_to_trajectory(
         trajectory_action = action;
     }
 
-    for (const auto& pose_stamped : ros_path.poses) {
+    for (size_t i = 0; i < ros_path.poses.size(); ++i) {
+        const auto& pose_stamped = ros_path.poses[i];
         auto point = convert_pose_to_trajectory_point(pose_stamped);
         // 应用beta-3信息
         point.orientation = beta3_info.orientation;
         point.flag = beta3_info.flag;
 
-        // 如果有动作，添加到轨迹点
-        if (trajectory_action.has_value()) {
+        // 🔧 修复：只在最后一个点添加动作信息（取货/卸货动作）
+        bool is_last_point = (i == ros_path.poses.size() - 1);
+        if (trajectory_action.has_value() && is_last_point) {
             point.action = trajectory_action;
         }
 

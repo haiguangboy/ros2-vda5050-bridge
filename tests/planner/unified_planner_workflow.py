@@ -357,7 +357,41 @@ class UnifiedPlannerNode(Node):
 
         # 发布前向轨迹
         forward_trajectory_id = f"pickup_forward_{int(time.time() * 1000)}"
-        self.publish_path(forward_waypoints, forward_trajectory_id, orientation=0.0, flag=0)
+
+        # 如果有托盘信息（MODE_FORK），使用完整的托盘信息
+        if self.pallet_info:
+            container_type = "AGV-T300"  # 默认容器类型
+            container_x = self.pallet_info['x']
+            container_y = self.pallet_info['y']
+            container_z = self.pallet_info['pose'].position.z  # 托盘z坐标
+            container_theta = self.quaternion_to_yaw(self.pallet_info['pose'].orientation)  # 托盘朝向
+            container_width = self.pallet_info['size'].y  # 使用托盘尺寸的y作为宽度
+
+            print(f"📦 ContainerPose:")
+            print(f"   x: {container_x:.3f}")
+            print(f"   y: {container_y:.3f}")
+            print(f"   z: {container_z:.3f}")
+            print(f"   theta: {container_theta:.3f}")
+            print(f"   width: {container_width:.2f}")
+            print(f"   container_type: {container_type}\n")
+            print(f"   action_type: pub_load_params\n")
+
+            self.publish_path(
+                forward_waypoints, forward_trajectory_id,
+                orientation=3.14, flag=1,
+                action_type="pub_load_params",  # 地面取货动作
+                container_type=container_type,
+                container_x=container_x,
+                container_y=container_y,
+                container_z=container_z,
+                container_theta=container_theta,
+                container_width=container_width
+            )
+        else:
+            # 没有托盘信息（兼容旧方式）
+            self.publish_path(forward_waypoints, forward_trajectory_id, orientation=0.0, flag=0)
+
+        # self.publish_path(forward_waypoints, forward_trajectory_id, orientation=0.0, flag=0)
         self.current_trajectory_id = forward_trajectory_id
         self.waiting_for_completion = True
 
@@ -414,37 +448,39 @@ class UnifiedPlannerNode(Node):
         backward_trajectory_id = f"pickup_backward_{int(time.time() * 1000)}"
 
         # 如果有托盘信息（MODE_FORK），使用完整的托盘信息
-        if self.pallet_info:
-            container_type = "AGV-T300"  # 默认容器类型
-            container_x = self.pallet_info['x']
-            container_y = self.pallet_info['y']
-            container_z = self.pallet_info['pose'].position.z  # 托盘z坐标
-            container_theta = self.quaternion_to_yaw(self.pallet_info['pose'].orientation)  # 托盘朝向
-            container_width = self.pallet_info['size'].y  # 使用托盘尺寸的y作为宽度
+        # if self.pallet_info:
+        #     container_type = "AGV-T300"  # 默认容器类型
+        #     container_x = self.pallet_info['x']
+        #     container_y = self.pallet_info['y']
+        #     container_z = self.pallet_info['pose'].position.z  # 托盘z坐标
+        #     container_theta = self.quaternion_to_yaw(self.pallet_info['pose'].orientation)  # 托盘朝向
+        #     container_width = self.pallet_info['size'].y  # 使用托盘尺寸的y作为宽度
 
-            print(f"📦 ContainerPose:")
-            print(f"   x: {container_x:.3f}")
-            print(f"   y: {container_y:.3f}")
-            print(f"   z: {container_z:.3f}")
-            print(f"   theta: {container_theta:.3f}")
-            print(f"   width: {container_width:.2f}")
-            print(f"   container_type: {container_type}\n")
-            print(f"   action_type: pub_load_params\n")
+        #     print(f"📦 ContainerPose:")
+        #     print(f"   x: {container_x:.3f}")
+        #     print(f"   y: {container_y:.3f}")
+        #     print(f"   z: {container_z:.3f}")
+        #     print(f"   theta: {container_theta:.3f}")
+        #     print(f"   width: {container_width:.2f}")
+        #     print(f"   container_type: {container_type}\n")
+        #     print(f"   action_type: pub_load_params\n")
 
-            self.publish_path(
-                backward_waypoints, backward_trajectory_id,
-                orientation=3.14, flag=1,
-                action_type="pub_load_params",  # 地面取货动作
-                container_type=container_type,
-                container_x=container_x,
-                container_y=container_y,
-                container_z=container_z,
-                container_theta=container_theta,
-                container_width=container_width
-            )
-        else:
-            # 没有托盘信息（兼容旧方式）
-            self.publish_path(backward_waypoints, backward_trajectory_id, orientation=3.14, flag=0)
+        #     self.publish_path(
+        #         backward_waypoints, backward_trajectory_id,
+        #         orientation=3.14, flag=1,
+        #         action_type="pub_load_params",  # 地面取货动作
+        #         container_type=container_type,
+        #         container_x=container_x,
+        #         container_y=container_y,
+        #         container_z=container_z,
+        #         container_theta=container_theta,
+        #         container_width=container_width
+        #     )
+        # else:
+        #     # 没有托盘信息（兼容旧方式）
+        #     self.publish_path(backward_waypoints, backward_trajectory_id, orientation=3.14, flag=0)
+
+        self.publish_path(backward_waypoints, backward_trajectory_id, orientation=3.14, flag=0)
 
         self.current_trajectory_id = backward_trajectory_id
         self.waiting_for_completion = True
