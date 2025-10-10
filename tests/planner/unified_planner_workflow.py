@@ -44,7 +44,7 @@ ENABLE_OBSERVATION_TRAJECTORY = True  # 是否启用观察点轨迹（SimpleTraj
 
 # 取货轨迹配置
 ENABLE_PICKUP_TRAJECTORY = True  # 是否启用取货轨迹（ComplexTrajectoryPlanner）
-ENABLE_CORRECTION_TRAJECTORY = False  # 是否启用误差消除轨迹（观察点完成后回正+倒车）
+ENABLE_CORRECTION_TRAJECTORY = True  # 是否启用误差消除轨迹（观察点完成后回正+倒车）
 CORRECTION_BACKWARD_DISTANCE = 0.6   # 误差消除轨迹的倒车距离（米）
 
 # 卸货轨迹配置
@@ -72,7 +72,7 @@ class UnifiedPlannerNode(Node):
 
         # ROS2订阅器
         self.odom_subscriber = self.create_subscription(
-            Odometry, ODOM_TOPIC, self.odom_callback, 20)
+            Odometry, ODOM_TOPIC, self.odom_callback, 10)
 
         # ROS2发布器
         self.path_publisher = self.create_publisher(Path, PATH_TOPIC, 10)
@@ -734,47 +734,6 @@ class UnifiedPlannerNode(Node):
         print(f"📡 更新/Odom: ({end_x:.3f}, {end_y:.3f}), yaw={end_yaw:.3f} ({math.degrees(end_yaw):.1f}°)")
         print(f"   (测试模式：轨迹终点 → /Odom)\n")
 
-    def _wait_for_odom_update(self, waypoints):
-        """
-        等待/Odom更新到轨迹终点（生产环境专用）
-
-        Args:
-            waypoints: 轨迹路径点列表，用于获取理论终点
-        """
-        if not waypoints:
-            print("   ⚠️ 无waypoints数据，跳过等待\n")
-            return
-
-        expected_x, expected_y, expected_yaw = waypoints[-1]
-        print(f"   理论终点: ({expected_x:.3f}, {expected_y:.3f})")
-
-        # 等待并接收最新的/Odom数据
-        wait_start = time.time()
-        max_wait = 2.0  # 最多等待2秒
-        threshold = 0.15  # 位置误差阈值（米）
-
-        while (time.time() - wait_start) < max_wait:
-            rclpy.spin_once(self, timeout_sec=0.05)  # 主动接收/Odom更新
-            current_x = self.current_odom.pose.pose.position.x
-            current_y = self.current_odom.pose.pose.position.y
-
-            # 🔧 修复：检查当前位置是否接近轨迹终点（距离小于阈值）
-            distance = math.sqrt((current_x - expected_x)**2 + (current_y - expected_y)**2)
-
-            if distance < threshold:
-                print(f"   ✅ /Odom已到达终点附近: ({current_x:.3f}, {current_y:.3f})")
-                print(f"      与理论终点距离: {distance:.3f}m < {threshold}m")
-                break
-        else:
-            # 超时，打印当前位置和距离
-            current_x = self.current_odom.pose.pose.position.x
-            current_y = self.current_odom.pose.pose.position.y
-            distance = math.sqrt((current_x - expected_x)**2 + (current_y - expected_y)**2)
-            print(f"   ⚠️ 等待超时，当前/Odom: ({current_x:.3f}, {current_y:.3f})")
-            print(f"      与理论终点距离: {distance:.3f}m，继续执行")
-
-        print()
-
     def handle_status_query(self, request, response):
         """处理轨迹状态查询service请求"""
         response.success = True
@@ -1027,13 +986,9 @@ class UnifiedPlannerNode(Node):
                     # 测试环境：将前向轨迹终点更新到/Odom，供倒车使用
                     if TEST_MODE and hasattr(self, 'forward_trajectory_waypoints'):
                         self.update_odom_from_trajectory_end(self.forward_trajectory_waypoints)
-                        print("⏳ 等待0.1秒后发布倒车轨迹...\n")
-                        time.sleep(WAIT_TIME)
-                    else:
-                        # 生产环境：等待真实/Odom更新到前向轨迹终点
-                        print("⏳ 等待/Odom更新到前向轨迹终点...")
-                        self._wait_for_odom_update(self.forward_trajectory_waypoints)
 
+                    print("⏳ 等待0.1秒后发布倒车轨迹...\n")
+                    time.sleep(WAIT_TIME)
                     self.publish_backward_trajectory()
 
                 elif "pickup_backward" in self.current_trajectory_id:
@@ -1056,13 +1011,9 @@ class UnifiedPlannerNode(Node):
                     # 测试环境：模拟Odom更新
                     if TEST_MODE and hasattr(self, 'unload_stage1_waypoints'):
                         self.update_odom_from_trajectory_end(self.unload_stage1_waypoints)
-                        print("⏳ 等待0.1秒后发布第2段...\n")
-                        time.sleep(WAIT_TIME)
-                    else:
-                        # 生产环境：等待真实/Odom更新
-                        print("⏳ 等待/Odom更新到第1段终点...")
-                        self._wait_for_odom_update(self.unload_stage1_waypoints)
 
+                    print("⏳ 等待0.1秒后发布第2段...\n")
+                    time.sleep(WAIT_TIME)
                     self.publish_unload_stage2()
 
                 elif "unload_stage2" in self.current_trajectory_id:
@@ -1071,13 +1022,9 @@ class UnifiedPlannerNode(Node):
                     # 测试环境：模拟Odom更新
                     if TEST_MODE and hasattr(self, 'unload_stage2_waypoints'):
                         self.update_odom_from_trajectory_end(self.unload_stage2_waypoints)
-                        print("⏳ 等待0.1秒后发布第3段...\n")
-                        time.sleep(WAIT_TIME)
-                    else:
-                        # 生产环境：等待真实/Odom更新
-                        print("⏳ 等待/Odom更新到第2段终点...")
-                        self._wait_for_odom_update(self.unload_stage2_waypoints)
 
+                    print("⏳ 等待0.1秒后发布第3段...\n")
+                    time.sleep(WAIT_TIME)
                     self.publish_unload_stage3()
 
                 elif "unload_stage3" in self.current_trajectory_id:
