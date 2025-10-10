@@ -44,11 +44,11 @@ ENABLE_OBSERVATION_TRAJECTORY = True  # 是否启用观察点轨迹（SimpleTraj
 
 # 取货轨迹配置
 ENABLE_PICKUP_TRAJECTORY = True  # 是否启用取货轨迹（ComplexTrajectoryPlanner）
-ENABLE_CORRECTION_TRAJECTORY = True  # 是否启用误差消除轨迹（观察点完成后回正+倒车）
+ENABLE_CORRECTION_TRAJECTORY = False  # 是否启用误差消除轨迹（观察点完成后回正+倒车）
 CORRECTION_BACKWARD_DISTANCE = 0.6   # 误差消除轨迹的倒车距离（米）
 
 # 卸货轨迹配置
-ENABLE_UNLOAD_TRAJECTORY = True  # 是否启用卸货轨迹（叉取完成后返回主干道并送到卸货点）
+ENABLE_UNLOAD_TRAJECTORY = False  # 是否启用卸货轨迹（叉取完成后返回主干道并送到卸货点）
 MAIN_ROAD_Y = 0.0  # 主干道的y坐标（米）
 
 # 默认位置（Odom超时时使用）
@@ -57,7 +57,7 @@ DEFAULT_Y = 0.0
 DEFAULT_YAW = 0.0
 
 # 等待的时间
-WAIT_TIME = 0.1
+WAIT_TIME = 2.1
 
 
 # ==================== 统一规划器节点 ====================

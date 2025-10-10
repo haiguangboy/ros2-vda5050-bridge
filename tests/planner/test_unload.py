@@ -51,13 +51,13 @@ class GoToPoseClient(Node):
         # 如果是FORK模式，设置托盘信息
         if mode == GoToPose.Request.MODE_FORK:
             request.pallet_pose.position.x = x
-            request.pallet_pose.position.y = y
-            request.pallet_pose.position.z = 1.5
+            request.pallet_pose.position.y = y - 1.85
+            request.pallet_pose.position.z = 1.15
             request.pallet_pose.orientation = self.yaw_to_quaternion(math.radians(yaw_deg))
 
             request.pallet_size.x = 1.2  # 长度
-            request.pallet_size.y = 0.7  # 宽度
-            request.pallet_size.z = 0.15  # 高度
+            request.pallet_size.y = 0.72  # 宽度
+            request.pallet_size.z = 0.2  # 高度
 
         mode_str = ["NORMAL", "FORK"][mode] if mode < 2 else "NORMAL"
         print(f"📤 发送目标点: ({x}, {y}, {yaw_deg}°)")
@@ -115,7 +115,7 @@ def main():
         print("="*80)
         print("步骤1: 发送观察点")
         print("="*80)
-        response1 = client.send_goal(x=3.0, y=0.0, yaw_deg=-90, mode=GoToPose.Request.MODE_NORMAL)
+        response1 = client.send_goal(x=1.0, y=0.0, yaw_deg=-90, mode=GoToPose.Request.MODE_NORMAL)
 
         if response1 and response1.arrived:
             print("✅ 观察点已到达！\n")
@@ -127,7 +127,7 @@ def main():
             print("步骤2: 发送取货点")
             print("="*80)
             pickup_yaw = 90 if ENABLE_CORRECTION_TRAJECTORY else 90
-            response2 = client.send_goal(x=4.0, y=-1.0, yaw_deg=pickup_yaw, mode=GoToPose.Request.MODE_FORK)
+            response2 = client.send_goal(x=2.0, y=-1.0, yaw_deg=pickup_yaw, mode=GoToPose.Request.MODE_FORK)
 
             if response2 and response2.arrived:
                 print("✅ 取货点已到达！\n")
@@ -140,7 +140,7 @@ def main():
                 print("="*80)
                 print("💡 卸货轨迹：倒车回主干道 → 转向 → 沿主干道行驶 → 转向 → 到达卸货点")
                 print("💡 使用MODE_NORMAL，系统会检测到取货后的目标点自动触发卸货轨迹")
-                response3 = client.send_goal(x=1.0, y=2.0, yaw_deg=-90, mode=GoToPose.Request.MODE_NORMAL, timeout_sec=900.0)
+                response3 = client.send_goal(x=1.0, y=1.0, yaw_deg=-90, mode=GoToPose.Request.MODE_NORMAL, timeout_sec=900.0)
 
                 if response3 and response3.arrived:
                     print("✅ 卸货点已到达！\n")
