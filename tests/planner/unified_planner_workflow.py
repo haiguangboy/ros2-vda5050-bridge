@@ -32,13 +32,14 @@ from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy, HistoryPo
 ODOM_TOPIC = "/Odom"
 PATH_TOPIC = "/plans"
 MQTT_BROKER = "192.168.1.102" #localhost for local test  192.168.1.102
+# MQTT_BROKER = "localhost"
 MQTT_PORT = 1883
 ROBOT_ID = "robot-001"
 
 # ==================== 环境配置 ====================
 # 测试环境 vs 生产环境
 TEST_MODE = False  # True=测试环境（模拟Odom更新），False=生产环境（使用真实Odom）
-
+# TEST_MODE = True
 # ==================== 轨迹开关配置 ====================
 # 观察点轨迹配置
 ENABLE_OBSERVATION_TRAJECTORY = True  # 是否启用观察点轨迹（SimpleTrajectoryPlanner）
@@ -63,6 +64,13 @@ WAIT_TIME = 2.1
 ODOM_WAIT_TIMEOUT = 1.5  # 秒
 ODOM_POS_TOL = 0.15      # 位置容差（米）
 ODOM_YAW_TOL = 0.35      # 朝向容差（弧度）
+
+# 曲线规划参数
+CURVE_STEP_SIZE = 0.15               # 路径点间距（米）
+CURVE_MAX_ANGLE_CHANGE = 0.105       # 相邻点最大角度差（6° = 0.105 rad）
+CURVE_POSITION_TOLERANCE = 0.08      # 终点位置容差（米）
+CURVE_ANGLE_TOLERANCE = 0.09         # 终点角度容差（约5°）
+CURVE_MAX_ITERATIONS = 200           # 最大搜索迭代次数
 
 
 # ==================== 统一规划器节点 ====================
@@ -112,6 +120,9 @@ class UnifiedPlannerNode(Node):
         # 倒车段触发（ROS线程驱动）
         self.backward_pending = False
         self.backward_prev_stamp = None
+        self.backward_prev_pose = None
+        self.backward_prev_count = 0
+        self.backward_forward_end = None
         self.backward_deadline = 0.0
         # 定时器：在ROS线程检查是否收到新鲜/Odom后再发布倒车段
         self.backward_timer = self.create_timer(0.05, self._check_and_publish_backward)
@@ -239,19 +250,32 @@ class UnifiedPlannerNode(Node):
         now = time.time()
         # 当前/上次快照
         prev_stamp = self.backward_prev_stamp
+        prev_pose = self.backward_prev_pose
+        prev_count = self.backward_prev_count
+        forward_end = self.backward_forward_end
         now_stamp = self.last_odom_stamp
         now_pose = self.last_odom_tuple
+        now_count = self.odom_update_count
 
         ready = False
-        if now_stamp is not None and prev_stamp is not None and now_stamp != prev_stamp:
+        # 条件1：计数增长（收到新样本）
+        if now_count > prev_count:
             ready = True
-        elif now_pose is not None:
-            # 允许位姿发生极小变化即视为已刷新
-            try:
-                px, py, pyaw = self.last_odom_tuple if self.last_odom_tuple else (0.0, 0.0, 0.0)
-                # 这里无法拿到prev_pose（触发时的姿态），使用时间戳优先；若时间戳无变化，则让超时兜底
-            except Exception:
-                pass
+        # 条件2：时间戳变化
+        if not ready and now_stamp is not None and prev_stamp is not None and now_stamp != prev_stamp:
+            ready = True
+        # 条件3：位姿发生变化
+        if not ready and now_pose is not None and prev_pose is not None:
+            nx, ny, nyaw = now_pose
+            px, py, pyaw = prev_pose
+            if math.hypot(nx - px, ny - py) > 1e-3 or abs(self._normalize_angle(nyaw - pyaw)) > 1e-3:
+                ready = True
+        # 条件4：当前位置已接近前向终点（允许直接开始倒车）
+        if not ready and now_pose is not None and forward_end is not None:
+            fx, fy, fyaw = forward_end
+            nx, ny, nyaw = now_pose
+            if math.hypot(nx - fx, ny - fy) < 0.25 and abs(self._normalize_angle(nyaw - fyaw)) < 0.4:
+                ready = True
         if not ready and now >= self.backward_deadline:
             ready = True
 
@@ -283,16 +307,33 @@ class UnifiedPlannerNode(Node):
         print(f"📍 起点: ({start_x:.3f}, {start_y:.3f}), yaw={start_yaw:.3f} ({math.degrees(start_yaw):.1f}°)")
         print(f"📍 终点: ({goal_x:.3f}, {goal_y:.3f}), yaw={goal_yaw:.3f} ({math.degrees(goal_yaw):.1f}°)\n")
 
-        # 计算前进距离和转弯角度（用于显示）
-        forward_distance = math.sqrt((goal_x - start_x)**2 + (goal_y - start_y)**2)
-        turn_angle = goal_yaw - start_yaw
+        # 计算前进距离和策略选择所需的角度差
+        dx = goal_x - start_x
+        dy = goal_y - start_y
+        forward_distance = math.sqrt(dx**2 + dy**2)
+
+        # 计算指向目标位置的方向
+        target_angle = math.atan2(dy, dx)
+
+        # 角度差：起始yaw 和 指向目标位置的方向 之间的差
+        angle_diff = abs(self._normalize_angle(target_angle - start_yaw))
 
         print(f"📐 自动计算参数:")
         print(f"   前进距离: {forward_distance:.3f} m")
-        print(f"   转弯角度: {turn_angle:.3f} rad ({math.degrees(turn_angle):.1f}°)\n")
+        print(f"   指向目标的方向: {target_angle:.3f} rad ({math.degrees(target_angle):.1f}°)")
+        print(f"   角度差（起始yaw→目标方向）: {angle_diff:.3f} rad ({math.degrees(angle_diff):.1f}°)\n")
 
-        # 规划轨迹（使用plan_from_pose方法）
-        waypoints = self.simple_planner.plan_from_pose(start_pose, goal_pose)
+        # 根据角度差选择规划策略
+        ANGLE_THRESHOLD = math.radians(20)  # 45° = 0.785 rad
+
+        if angle_diff <= ANGLE_THRESHOLD:
+            # 小角度：使用曲线规划（边走边转）
+            print(f"📋 策略选择: 曲线规划（角度差 ≤ 20°）\n")
+            waypoints = self.simple_planner.plan_from_pose_curve(start_pose, goal_pose)
+        else:
+            # 大角度：使用传统规划（原地转+直行+原地转）
+            print(f"📋 策略选择: 传统规划（角度差 > 20°）\n")
+            waypoints = self.simple_planner.plan_from_pose(start_pose, goal_pose)
 
         print(f"✅ 轨迹生成完成，共 {len(waypoints)} 个路径点\n")
         self.print_all_waypoints(waypoints)
@@ -1024,7 +1065,10 @@ class UnifiedPlannerNode(Node):
             if ENABLE_OBSERVATION_TRAJECTORY:
                 print(f"✅ 接受为观察点（MODE_NORMAL）")
                 print(f"规划策略: SimpleTrajectoryPlanner\n")
+                # 先旋转+直行 轨迹
                 self.plan_and_publish_simple(goal_pose)
+                # 边走边转 轨迹
+                # self.plan_and_publish_simple_curve(goal_pose)
             else:
                 print(f"⚠️ 观察点轨迹未启用（ENABLE_OBSERVATION_TRAJECTORY=False）")
                 response.arrived = False
@@ -1183,6 +1227,9 @@ class UnifiedPlannerNode(Node):
 
                     # 生产环境：只置位，由ROS线程（定时器）在检测到/Odom刷新或超时后发布倒车段
                     self.backward_prev_stamp = self.last_odom_stamp
+                    self.backward_prev_pose = self.last_odom_tuple
+                    self.backward_prev_count = self.odom_update_count
+                    self.backward_forward_end = self.forward_trajectory_waypoints[-1] if hasattr(self, 'forward_trajectory_waypoints') and self.forward_trajectory_waypoints else None
                     self.backward_deadline = time.time() + ODOM_WAIT_TIMEOUT
                     self.backward_pending = True
                     print("⏳ 已置位倒车段触发，交由ROS线程等待/Odom刷新后发布\n")

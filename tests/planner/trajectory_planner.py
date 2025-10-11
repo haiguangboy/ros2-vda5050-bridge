@@ -141,6 +141,263 @@ class SimpleTrajectoryPlanner:
 
         return waypoints
 
+    def plan_from_pose_curve(self, start_pose: Pose, goal_pose: Pose) -> List[Tuple[float, float, float]]:
+        """
+        基于ROS2 Pose消息规划曲线路径
+
+        Args:
+            start_pose: 起点Pose（geometry_msgs/Pose）
+            goal_pose: 目标点Pose（geometry_msgs/Pose）
+
+        Returns:
+            路径点列表 [(x, y, yaw), ...]
+        """
+        # 提取起点信息
+        start_x = start_pose.position.x
+        start_y = start_pose.position.y
+        start_yaw = self._quaternion_to_yaw(start_pose.orientation)
+
+        # 提取目标点信息
+        goal_x = goal_pose.position.x
+        goal_y = goal_pose.position.y
+        goal_yaw = self._quaternion_to_yaw(goal_pose.orientation)
+
+        return self.plan_curve(start_x, start_y, start_yaw, goal_x, goal_y, goal_yaw)
+
+    def plan_curve(self, start_x: float, start_y: float, start_yaw: float,
+             goal_x: float, goal_y: float, goal_yaw: float) -> List[Tuple[float, float, float]]:
+        """
+        基于搜索算法的曲线路径规划
+
+        适用场景：目标点和起始点角度差 ≤ 45°
+
+        算法特点：
+        - 每步固定距离 0.15m
+        - 相邻步yaw变化 ≤ 6°（0.105 rad）
+        - 必须到达目标位置（位置通过搜索算法）
+        - 使用贪心搜索 + 启发式引导
+
+        分3个阶段：
+        - 阶段1+2合并：使用搜索算法生成曲线路径到达目标位置
+        - 阶段3：原地旋转到目标yaw（保留原有逻辑）
+
+        Args:
+            start_x, start_y, start_yaw: 起点位置和朝向（弧度）
+            goal_x, goal_y, goal_yaw: 目标位置和朝向（弧度）
+
+        Returns:
+            路径点列表 [(x, y, yaw), ...]
+        """
+        waypoints = []
+
+        # 计算到目标位置的距离和方向
+        dx = goal_x - start_x
+        dy = goal_y - start_y
+        distance = math.sqrt(dx**2 + dy**2)
+
+        # 计算移动到目标位置所需的朝向角度
+        target_angle = math.atan2(dy, dx)
+
+        print(f"\n📋 曲线路径规划开始:")
+        print(f"   起点: ({start_x:.3f}, {start_y:.3f}), yaw={start_yaw:.3f} ({math.degrees(start_yaw):.1f}°)")
+        print(f"   终点: ({goal_x:.3f}, {goal_y:.3f}), yaw={goal_yaw:.3f} ({math.degrees(goal_yaw):.1f}°)")
+        print(f"   直线距离: {distance:.3f}m")
+
+        # 特殊情况：起点和终点位置重合，只需旋转
+        if distance < 0.01:
+            print(f"   策略: 仅原地旋转")
+            waypoints = self._generate_rotation_path(
+                start_x, start_y, start_yaw, goal_yaw
+            )
+            return waypoints
+
+        # 阶段1+2（合并）：使用搜索算法生成曲线路径到达目标位置
+        print(f"   阶段1+2: 搜索曲线路径到达目标位置")
+        curve_waypoints = self._search_curve_to_position(
+            start_x, start_y, start_yaw,
+            goal_x, goal_y
+        )
+
+        if not curve_waypoints:
+            print(f"   ⚠️  曲线搜索失败，回退到原有plan()方法")
+            # 回退到原始的三阶段规划
+            return self.plan(start_x, start_y, start_yaw, goal_x, goal_y, goal_yaw)
+
+        waypoints.extend(curve_waypoints)
+
+        # 更新当前位置（曲线终点）
+        current_x, current_y, current_yaw = waypoints[-1]
+
+        # 阶段3：旋转到目标朝向（如果需要）
+        final_angle_diff = self._normalize_angle(goal_yaw - current_yaw)
+
+        if abs(final_angle_diff) > 0.1:
+            print(f"   阶段3: 原地旋转 {math.degrees(final_angle_diff):.1f}° 到目标朝向")
+            rotation_points = self._generate_rotation_path(
+                current_x, current_y, current_yaw, goal_yaw
+            )
+            # 去掉第一个点避免重复
+            waypoints.extend(rotation_points[1:])
+
+        print(f"   ✅ 规划完成: 共 {len(waypoints)} 个路径点\n")
+
+        return waypoints
+
+    def _search_curve_to_position(self, start_x: float, start_y: float, start_yaw: float,
+                                  goal_x: float, goal_y: float) -> List[Tuple[float, float, float]]:
+        """
+        搜索从起点到目标位置的曲线路径（贪心搜索 + 启发式）
+
+        算法核心：
+        1. 从起点开始迭代
+        2. 每步生成多个候选角度（在±6°范围内，满足相邻约束）
+        3. 计算每个候选的下一个位置（由运动学约束决定）：
+           next_x = current_x + step_size * cos(candidate_yaw)
+           next_y = current_y + step_size * sin(candidate_yaw)
+        4. 评估代价：distance_to_goal（只考虑位置，不考虑yaw）
+        5. 选择最优候选
+        6. 重复直到到达目标位置
+
+        参数：
+        - start_x, start_y, start_yaw: 起点位置和姿态
+        - goal_x, goal_y: 目标位置（不包含目标yaw）
+
+        返回：
+        - waypoints: [(x, y, yaw), ...] 或 None（搜索失败）
+        """
+        # 搜索参数
+        MAX_ANGLE_CHANGE = 0.08  # 6° = 0.105 rad
+        POSITION_TOLERANCE = 0.08  # 位置容差8cm
+        MAX_ITERATIONS = 200  # 最大迭代次数
+
+        print(f"      🔍 开始搜索曲线路径...")
+
+        waypoints = [(start_x, start_y, start_yaw)]
+        current_x, current_y, current_yaw = start_x, start_y, start_yaw
+
+        # 记录最小距离，用于检测是否在绕圈
+        min_dist_seen = float('inf')
+        iterations_since_improvement = 0
+
+        # 主搜索循环
+        for iteration in range(MAX_ITERATIONS):
+            # 检查是否到达目标位置
+            dist_to_goal = math.sqrt((goal_x - current_x)**2 + (goal_y - current_y)**2)
+
+            if dist_to_goal < POSITION_TOLERANCE:
+                # 到达目标位置！如果有误差，添加最终点
+                if dist_to_goal > 0.01:
+                    waypoints.append((goal_x, goal_y, current_yaw))
+                print(f"      ✅ 搜索成功！迭代次数: {iteration + 1}")
+                print(f"         最终位置误差: {dist_to_goal*1000:.1f}mm")
+                return waypoints
+
+            # 检测是否在改进（避免绕圈）
+            if dist_to_goal < min_dist_seen - 0.01:  # 有明显改进（>1cm）
+                min_dist_seen = dist_to_goal
+                iterations_since_improvement = 0
+            else:
+                iterations_since_improvement += 1
+
+            # 如果连续50步没有改进，可能陷入绕圈，提前退出
+            if iterations_since_improvement > 50:
+                print(f"      ⚠️  连续{iterations_since_improvement}步未改进，可能陷入局部最优")
+                print(f"         最小距离: {min_dist_seen:.3f}m, 当前距离: {dist_to_goal:.3f}m")
+                # 如果曾经接近过目标（<2倍容差），返回路径
+                if min_dist_seen < POSITION_TOLERANCE * 2:
+                    print(f"         曾接近目标，返回当前路径")
+                    waypoints.append((goal_x, goal_y, current_yaw))
+                    return waypoints
+                else:
+                    return None
+
+            # 生成候选角度 - 灵活策略
+            # 核心思想：优先尝试指向目标的角度，同时在允许范围内生成多个备选
+            angle_to_goal_pos = math.atan2(goal_y - current_y, goal_x - current_x)
+            ideal_angle_change = self._normalize_angle(angle_to_goal_pos - current_yaw)
+
+            candidates = []
+
+            # 1. 理想候选：尽量指向目标
+            if abs(ideal_angle_change) <= MAX_ANGLE_CHANGE:
+                # 理想角度在范围内，直接使用
+                candidates.append(angle_to_goal_pos)
+            else:
+                # 超出范围，使用朝向目标方向的边界角度
+                candidates.append(current_yaw + math.copysign(MAX_ANGLE_CHANGE, ideal_angle_change))
+
+            # 2. 备选候选：在允许范围内均匀分布（提供多样性）
+            # 使用更密集的采样：-100%, -75%, -50%, -25%, 0%, +25%, +50%, +75%, +100%
+            for ratio in [-1.0, -0.75, -0.5, -0.25, 0.0, 0.25, 0.5, 0.75, 1.0]:
+                candidate = current_yaw + ratio * MAX_ANGLE_CHANGE
+                # 去重：如果与已有候选接近（<1°），跳过
+                is_duplicate = any(abs(self._normalize_angle(candidate - existing)) < 0.017
+                                  for existing in candidates)
+                if not is_duplicate:
+                    candidates.append(candidate)
+
+            # 评估每个候选
+            best_candidate = None
+            best_cost = float('inf')
+
+            for candidate_yaw in candidates:
+                # 检查相邻角度约束
+                angle_change = abs(self._normalize_angle(candidate_yaw - current_yaw))
+                if angle_change > MAX_ANGLE_CHANGE + 0.001:  # 允许小量数值误差
+                    continue
+
+                # 计算下一个位置（由运动学约束决定）
+                next_x = current_x + self.step_size * math.cos(candidate_yaw)
+                next_y = current_y + self.step_size * math.sin(candidate_yaw)
+
+                # 计算到目标的距离
+                dist_to_goal_next = math.sqrt((goal_x - next_x)**2 + (goal_y - next_y)**2)
+
+                # 改进的启发式代价：考虑方向对齐度
+                # 计算下一步的朝向与"指向目标"的夹角
+                if dist_to_goal_next > 0.01:  # 避免除零
+                    angle_to_goal_from_next = math.atan2(goal_y - next_y, goal_x - next_x)
+                    direction_alignment = abs(self._normalize_angle(angle_to_goal_from_next - candidate_yaw))
+                else:
+                    direction_alignment = 0.0
+
+                # 组合代价：距离 + 方向偏差惩罚
+                # 当距离较远时，主要考虑距离；接近目标时，增加方向对齐的权重
+                if dist_to_goal > 0.5:
+                    # 远离目标：主要看距离
+                    cost = dist_to_goal_next + 0.1 * direction_alignment
+                else:
+                    # 接近目标：增加方向对齐的重要性，避免"冲过头"
+                    cost = dist_to_goal_next + 0.5 * direction_alignment
+
+                if cost < best_cost:
+                    best_cost = cost
+                    best_candidate = (next_x, next_y, candidate_yaw)
+
+            if best_candidate is None:
+                print(f"      ❌ 搜索失败：第{iteration + 1}步无法找到满足约束的候选")
+                return None
+
+            # 更新当前位置
+            current_x, current_y, current_yaw = best_candidate
+            waypoints.append(best_candidate)
+
+            # 每10步打印进度
+            if (iteration + 1) % 10 == 0:
+                print(f"         迭代 {iteration + 1}: 距离目标 {dist_to_goal:.3f}m")
+
+        # 达到最大迭代次数
+        print(f"      ⚠️  达到最大迭代次数 {MAX_ITERATIONS}，搜索终止")
+        print(f"         当前位置误差: {dist_to_goal:.3f}m")
+
+        # 如果接近目标（容差放宽2倍），仍返回结果
+        if dist_to_goal < POSITION_TOLERANCE * 2:
+            print(f"         接近目标，返回当前路径")
+            waypoints.append((goal_x, goal_y, current_yaw))
+            return waypoints
+        else:
+            return None
+
     def _generate_rotation_path(self, x: float, y: float,
                                 start_yaw: float, end_yaw: float) -> List[Tuple[float, float, float]]:
         """
