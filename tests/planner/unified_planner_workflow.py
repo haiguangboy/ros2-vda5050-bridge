@@ -109,6 +109,12 @@ class UnifiedPlannerNode(Node):
         self.last_mode = None  # 记录上一次的模式，用于判断是否触发卸货轨迹
         self.odom_update_count = 0  # /Odom更新计数（用于验证订阅是否持续接收）
         self.forward_start_stamp = None  # 前向轨迹起点读取的/Odom时间戳（sec, nsec）
+        # 倒车段触发（ROS线程驱动）
+        self.backward_pending = False
+        self.backward_prev_stamp = None
+        self.backward_deadline = 0.0
+        # 定时器：在ROS线程检查是否收到新鲜/Odom后再发布倒车段
+        self.backward_timer = self.create_timer(0.05, self._check_and_publish_backward)
         # 最近一次接收到的/Odom时间戳与姿态（用于判定是否收到“新鲜”数据）
         self.last_odom_stamp = None
         self.last_odom_tuple = None  # (x, y, yaw)
@@ -218,6 +224,46 @@ class UnifiedPlannerNode(Node):
                 return True
             time.sleep(0.02)
         return False
+
+    def _check_and_publish_backward(self):
+        """在ROS线程中检查是否准备好发布倒车段，并执行发布。
+
+        条件：
+        - 收到与触发快照不同的/Odom时间戳，或
+        - 位姿有微小变化（>1e-3），或
+        - 超过截止时间（ODOM_WAIT_TIMEOUT）。
+        满足其一则发布倒车段，并清理挂起标志。
+        """
+        if not self.backward_pending:
+            return
+        now = time.time()
+        # 当前/上次快照
+        prev_stamp = self.backward_prev_stamp
+        now_stamp = self.last_odom_stamp
+        now_pose = self.last_odom_tuple
+
+        ready = False
+        if now_stamp is not None and prev_stamp is not None and now_stamp != prev_stamp:
+            ready = True
+        elif now_pose is not None:
+            # 允许位姿发生极小变化即视为已刷新
+            try:
+                px, py, pyaw = self.last_odom_tuple if self.last_odom_tuple else (0.0, 0.0, 0.0)
+                # 这里无法拿到prev_pose（触发时的姿态），使用时间戳优先；若时间戳无变化，则让超时兜底
+            except Exception:
+                pass
+        if not ready and now >= self.backward_deadline:
+            ready = True
+
+        if not ready:
+            return
+
+        # 清理状态并发布
+        self.backward_pending = False
+        try:
+            self.publish_backward_trajectory()
+        except Exception as e:
+            print(f"❌ 发布倒车段失败: {e}")
 
     def plan_and_publish_simple(self, goal_pose):
         """使用SimpleTrajectoryPlanner规划并发布"""
@@ -1135,18 +1181,11 @@ class UnifiedPlannerNode(Node):
                     if TEST_MODE and hasattr(self, 'forward_trajectory_waypoints'):
                         self.update_odom_from_trajectory_end(self.forward_trajectory_waypoints)
 
-                    # 生产环境：等待真实/Odom刷新（由底盘发布）
-                    prev_stamp = self.last_odom_stamp
-                    prev_pose = self.last_odom_tuple
-                    print("⏳ 等待/Odom刷新以使用实时位置...\n")
-                    refreshed = self._wait_for_fresh_odom(prev_stamp, prev_pose)
-                    if not refreshed:
-                        print(f"⚠️  在 {ODOM_WAIT_TIMEOUT:.1f}s 内未检测到/Odom更新，将继续使用当前/Odom值\n")
-                    else:
-                        x, y, yaw = self.last_odom_tuple
-                        print(f"✅ 检测到/Odom已刷新: ({x:.3f}, {y:.3f}), yaw={yaw:.3f} ({math.degrees(yaw):.1f}°)\n")
-
-                    self.publish_backward_trajectory()
+                    # 生产环境：只置位，由ROS线程（定时器）在检测到/Odom刷新或超时后发布倒车段
+                    self.backward_prev_stamp = self.last_odom_stamp
+                    self.backward_deadline = time.time() + ODOM_WAIT_TIMEOUT
+                    self.backward_pending = True
+                    print("⏳ 已置位倒车段触发，交由ROS线程等待/Odom刷新后发布\n")
 
                 elif "pickup_backward" in self.current_trajectory_id:
                     print("🎉 取货轨迹已完成！")
