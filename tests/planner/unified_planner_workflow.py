@@ -15,6 +15,8 @@
 
 import rclpy
 from rclpy.node import Node
+from rclpy.executors import MultiThreadedExecutor
+import threading
 from geometry_msgs.msg import PoseStamped, Pose, PoseWithCovarianceStamped, Quaternion
 from nav_msgs.msg import Path, Odometry
 from example_interfaces.srv import Trigger
@@ -1416,12 +1418,31 @@ def main():
     print("="*80)
     print()
 
+    # 使用多线程执行器，确保订阅与定时器在独立线程持续运行
+    executor = MultiThreadedExecutor()
+    executor.add_node(node)
+
+    def _spin_executor():
+        try:
+            executor.spin()
+        except Exception as e:
+            print(f"❌ 执行器运行异常: {e}")
+
+    spin_thread = threading.Thread(target=_spin_executor, daemon=True)
+    spin_thread.start()
+
     try:
         print("💡 等待目标点，按 Ctrl+C 停止\n")
-        rclpy.spin(node)
+        # 主线程保持运行，执行器在后台线程spin
+        while True:
+            time.sleep(0.5)
     except KeyboardInterrupt:
         print("\n⏹️  收到停止信号")
     finally:
+        try:
+            executor.shutdown()
+        except Exception:
+            pass
         node.stop()
         node.destroy_node()
         rclpy.shutdown()

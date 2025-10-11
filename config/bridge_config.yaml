@@ -20,7 +20,7 @@ zhongli_bridge:
     goal_tolerance_theta: 0.1 # 角度容差 (弧度)
 
     # 路径转换参数
-    default_max_speed: 0.2 #认最大速度 (米/秒)
+    default_max_speed: 0.15 #认最大速度 (米/秒)
 
     # MQTT QoS设置
     mqtt_qos: 1
